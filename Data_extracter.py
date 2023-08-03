@@ -58,14 +58,13 @@ companies_soup = soup.find_all('a',{'class':'screener-link'})  #gets all stock d
 
 
 companies_text = []
-for i in range(20):
-# for t in companies_soup:
-    companies_text.append(tickers[i].text)
-    companies_text.append(companies_soup[i].text)
-    # companies_text.append(t.text)
+for t in companies_soup:
+    companies_text.append(t.text)
 companies = [companies_text[x:x+10] for x in range(0, len(companies_text), 10)]
 
-print(companies[1])
+for i in range(20):
+    companies[i].append(tickers[i].text)
+print(companies[19])
 # print(len(companies))
 # for t in companies:
 #     print(t.text)
