@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import logging
 import threading
-import Data_logger
+# import Data_logger
 # import subprocess
 # import time
 
@@ -43,7 +43,7 @@ def from_response_to_soup(response):
 
 def extract_num_of_pages(soup):
     pagination_Num = soup.find_all('a',{'class':'screener-pages'})  #Subjective part of code.
-    num_Of_Pages = pagination_Num[len(pagination_Num)-1].text
+    num_Of_Pages = pagination_Num[len(pagination_Num)-2].text
     logging.info("Number of pages to scrape is {}".format(num_Of_Pages))
     return num_Of_Pages
 
@@ -52,11 +52,14 @@ def extract_num_of_pages(soup):
 
 def get_stocks_in_page(soup):
     tickers = soup.find_all('a',{'class':'screener-link-primary'})  #Subjective part of code. WORKS, finds stock tickers
+    print(tickers)
     companies_soup = soup.find_all('a',{'class':'screener-link'})  #gets all stock data !!!!
+    print(companies_soup)
     companies_text = []
     for t in companies_soup:
         companies_text.append(t.text)
-    companies = [companies_text[x:x+10] for x in range(0, len(companies_text), 10)]
+    print(companies_text)    
+    companies = [companies_text[x:x+10] for x in range(0, len(companies_text), 10)] #10 is num of values each stock holds in array of entire stock data AKA companies_text
     for i in range(20):
         companies[i].append(tickers[i].text) 
     return companies    
@@ -103,4 +106,4 @@ t1 = threading.Thread(target=t1_stocks, name='t1')
 t2 = threading.Thread(target=t2_stocks, name='t2')
 
 t1.start()
-t2.start()
+# t2.start()

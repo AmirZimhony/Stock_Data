@@ -1,6 +1,6 @@
 #log data to DB
 
-###NEXT SESSION -1.add logic for checking if stock exists in DB. Make lists of new + deleted stocks. 
+###NEXT SESSION  - 1. Define schema for stocks 2.add logic for checking if stock exists in DB. Make lists of new + deleted stocks. 
 
 
 import pymongo
@@ -25,6 +25,25 @@ info.insert_many(test_rec)
 # //----------define our database structure----------
 
 # StockSchema = {
+#     'Ticker': {'type':String},
+#     'Name': String,
+#     'Price': String,
+#     'MarketCap': Number,
+#     'Country': String,
+#     'Volume': Number,
+#     'Sector': String,
+#     'Industry': String,
+#     'Change': Number,
+#     'P/E': Number,    
+#     'numOfRisingDays': Number,
+#     'accumulatedChange': Number
+# };
+
+# def get_stock_and_log2DB(stock):
+#     StockSchema[stock]
+#     info.insert_one(StockSchema)
+
+# StockSchema = {
 #     Ticker: String,[10] constant
 #     Name: String,[1] constant
 #     Price: String,[7] changing
@@ -38,7 +57,3 @@ info.insert_many(test_rec)
 #     numOfRisingDays: Number,
 #     accumulatedChange: Number
 # };
-
-def get_stock_and_log2DB(stock):
-    StockSchema[stock]
-    info.insert_one(StockSchema)
