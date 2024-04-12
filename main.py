@@ -13,6 +13,7 @@ Beginner's Instructions:
    `python main.py`    
 """
 
+import random
 import requests
 import time
 from bs4 import BeautifulSoup
@@ -84,29 +85,35 @@ def write_or_update_to_mongo(page_data):
     for data in page_data: #ADD ERROR handling in case "-" is part of the stock's data
         try:
             current_stock = collection.find_one({"serial_number": data["serial_number"]})
-            new_change = float(data["change"].strip("%"))
-            current_rising_days = 0 if current_stock["numOfRisingDays"] == "-" else int(current_stock["numOfRisingDays"])
-            current_change = 0 if current_stock["accumulatedChange"] == "-" else float(current_stock["accumulatedChange"])
-            if new_change > 0:
-                if current_rising_days < 0:
-                    rising_days = 1
-                    incremental_change = new_change
-                else:
-                    rising_days = current_rising_days + 1
-                    incremental_change = current_change + new_change
-            else:
-                if new_change < 0:
-                    if current_rising_days > 0:    
-                        rising_days = -1
-                        incremental_change = new_change
-                    else:            
-                        rising_days = current_rising_days - 1
-                        incremental_change = current_change + new_change
-                else:
-                    rising_days = current_rising_days
-                    incremental_change = current_change
+            if current_stock is not None:
+                try:          
+                    new_change = float(data["change"].strip("%"))
+                    current_rising_days = 0 if current_stock["numOfRisingDays"] == "-" else int(current_stock["numOfRisingDays"])
+                    current_change = 0 if current_stock["accumulatedChange"] == "-" else float(current_stock["accumulatedChange"])
+                    if new_change > 0:
+                        if current_rising_days < 0:
+                            rising_days = 1
+                            incremental_change = new_change
+                        else:
+                            rising_days = current_rising_days + 1
+                            incremental_change = current_change + new_change
+                    else:
+                        if new_change < 0:
+                            if current_rising_days > 0:    
+                                rising_days = -1
+                                incremental_change = new_change
+                            else:            
+                                rising_days = current_rising_days - 1
+                                incremental_change = current_change + new_change
+                        else:
+                            rising_days = current_rising_days
+                            incremental_change = current_change
+                except Exception as e:
+                    print(f"Error fetching data row: {e}")
         except Exception as e:
-            print(f"Error fetching data row: {e}")
+            print(f"Error in making request to mongo: {e}")
+            # else:
+            #     print("Stock {} was not found in DB".format(data['serial_number']))        
     try:
         collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
             "ticker": data["ticker"],
@@ -139,7 +146,10 @@ def get_data(start):
     """
     url = "https://finviz.com/screener.ashx?v=111" if start == 1 else f"https://finviz.com/screener.ashx?v=111&R={start}"
     
-    proxy_url = "http://qgzgcxvk:m5dkuqvxcnuy@38.154.227.167:5868"
+    # proxy_string = "http://qgzgcxvk:m5dkuqvxcnuy@"
+    # proxy_string = "http://"
+    # proxy_url = proxy_string + "38.170.189.191:9757"
+    proxy_url= 'http://qgzgcxvk-rotate:m5dkuqvxcnuy@p.webshare.io:80'
 
     proxies = {
     'http': proxy_url,
@@ -149,10 +159,10 @@ def get_data(start):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     }
-    time.sleep(0.1)
+    time.sleep(1)
 
     try:
-        response = requests.get(url, headers=headers, proxies=proxies)
+        response = requests.get(url, proxies=proxies, headers=headers, timeout=1)
         while response.status_code != 200:
             response = requests.get(url, headers=headers)
     except Exception as e:
@@ -185,13 +195,26 @@ def get_data(start):
         print(f"Retrieved data for {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
         write_or_update_to_mongo(page_data)
 
+
+
+def get_proxy_randomly():
+    proxy_list = ['38.154.227.167:5868', '185.199.229.156:7492', '185.199.228.220:7300',
+                '185.199.231.45:8382', '188.74.210.207:6286', '188.74.183.10:8279',
+                '188.74.210.21:6100', '45.155.68.129:8133', '154.95.36.199:6893', 
+                '45.94.47.66:8110'] 
+    random_number = random.randint(0, 9)
+    return proxy_list[random_number]
+
+
+
 # Execute the data retrieval in a multi-threaded manner to improve efficiency
-        
- 
+         
 def main():  
     # if was_there_trading():             
     with ThreadPoolExecutor(max_workers=50) as executor:
-        executor.map(get_data, range(1, 9501, 20))
+        # executor.map(get_data, range(1, 9501, 20))
+        executor.map(get_data, range(1, 1001, 20))
+    executor.shutdown(wait=True)    
 
 if __name__ == "__main__":
     main() 
