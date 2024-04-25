@@ -30,36 +30,6 @@ client = MongoClient(CONNECTION_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
-def was_there_trading():
-    # collection.find_one({"serial_number": data["serial_number"]})
-    msft_last_change = collection.find_one({"ticker": "MSFT"})["change"]
-    msft_url = "https://finance.yahoo.com/quote/MSFT/history/?guccounter=1&guce_referrer=aHR0cHM6Ly93d3cuZ29vZ2xlLmNvbS8&guce_referrer_sig=AQAAAN6ZYIgRMxMyzJHXk0WqS7Fkss-h8M0_s1eQNN9xaNs8h01rFoFSbjiQaCoVEtxVSdN2ZZSHL0ueEoHyIctH7Ht4tPAv4O9PVlIP0c_GlUt7XPow8CeiAAq1e9FTqt9pNSNvhUrUDZ5c43KGNdilMLIg6NlvIqDvb7ZEQloAmQB7"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    }
-    
-    response = requests.get(msft_url, headers=headers)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    # # div = soup.find('div', class_='symbol-page-header__pricing-changes')["span"][1]
-    # nasdaq_change = soup.select_one('span.symbol-page-header__pricing-percent')
-    # print(nasdaq_change)
-
-    # Find the element containing the current stock price
-    price_element = soup.find("span", class_="e3b14781 ee3e99dd e59c8479")
-
-
-    if price_element:
-        current_price = price_element.get_text.strip()
-        print("Current Price:", current_price)
-    else:
-        print("Failed to retrieve the current price.")
-    
-
-    if msft_last_change != 0.5:
-        print("No activity today!")
-        return False
-    else:
-        return True
 
 def write_or_update_to_mongo(page_data):
     """
@@ -162,11 +132,19 @@ def get_data(start):
     time.sleep(1)
 
     try:
-        response = requests.get(url, proxies=proxies, headers=headers, timeout=1)
+        response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
+        trial_count = 0
         while response.status_code != 200:
-            response = requests.get(url, headers=headers)
+            if trial_count < 5:
+                print(f"Error making request: {response.status_code}")
+                response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
+                trial_count += 1
+            else:
+                print(f"Error making request: {response.status_code}")
+                return
     except Exception as e:
             print(f"Error making request: {e}")
+            return
     soup = BeautifulSoup(response.text, 'html.parser')
     page_data = []
     table = soup.select_one("table.screener_table")
@@ -197,23 +175,13 @@ def get_data(start):
 
 
 
-def get_proxy_randomly():
-    proxy_list = ['38.154.227.167:5868', '185.199.229.156:7492', '185.199.228.220:7300',
-                '185.199.231.45:8382', '188.74.210.207:6286', '188.74.183.10:8279',
-                '188.74.210.21:6100', '45.155.68.129:8133', '154.95.36.199:6893', 
-                '45.94.47.66:8110'] 
-    random_number = random.randint(0, 9)
-    return proxy_list[random_number]
-
-
-
 # Execute the data retrieval in a multi-threaded manner to improve efficiency
          
 def main():  
     # if was_there_trading():             
     with ThreadPoolExecutor(max_workers=50) as executor:
         # executor.map(get_data, range(1, 9501, 20))
-        executor.map(get_data, range(1, 1001, 20))
+        executor.map(get_data, range(1,  9501, 20))
     executor.shutdown(wait=True)    
 
 if __name__ == "__main__":
