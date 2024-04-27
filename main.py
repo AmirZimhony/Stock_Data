@@ -140,7 +140,7 @@ def get_data(start):
                 response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
                 trial_count += 1
             else:
-                print(f"Error making request: {response.status_code}")
+                print(f"Error making request more than 5 times: {response.status_code}")
                 return
     except Exception as e:
             print(f"Error making request: {e}")
