@@ -84,23 +84,23 @@ def write_or_update_to_mongo(page_data):
             print(f"Error in making request to mongo: {e}")
             # else:
             #     print("Stock {} was not found in DB".format(data['serial_number']))        
-    try:
-        collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
-            "ticker": data["ticker"],
-            "company": data["company"],
-            "sector": data["sector"],
-            "industry": data["industry"],
-            "country": data["country"],
-            "market_cap": data["market_cap"],
-            "pe_ratio": data["pe_ratio"],
-            "price": data["price"],
-            "change": data["change"],
-            "volume": data["volume"],
-            "numOfRisingDays": "0" if rising_days is None else str(rising_days),
-            "accumulatedChange": str(incremental_change)
-            }}, upsert=True)
-    except Exception as e:
-            print(f"Error writing data row: {e}")
+        try:
+            collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
+                "ticker": data["ticker"],
+                "company": data["company"],
+                "sector": data["sector"],
+                "industry": data["industry"],
+                "country": data["country"],
+                "market_cap": data["market_cap"],
+                "pe_ratio": data["pe_ratio"],
+                "price": data["price"],
+                "change": data["change"],
+                "volume": data["volume"],
+                "numOfRisingDays": "0" if rising_days is None else str(rising_days),
+                "accumulatedChange": str(incremental_change)
+                }}, upsert=True)
+        except Exception as e:
+                print(f"Error writing data row: {e}")
     print(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
 
 
