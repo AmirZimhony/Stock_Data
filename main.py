@@ -52,14 +52,20 @@ def write_or_update_to_mongo(page_data):
     # Update Records
 
 
-    for data in page_data: #ADD ERROR handling in case "-" is part of the stock's data
+    for data in page_data:
         try:
             current_stock = collection.find_one({"serial_number": data["serial_number"]})
             if current_stock is not None:
-                try:          
-                    new_change = float(data["change"].strip("%"))
+                try:
+                    # Handle the case where change is "-"
+                    new_change = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    
+                    # Handle the case where numOfRisingDays is "-"
                     current_rising_days = 0 if current_stock["numOfRisingDays"] == "-" else int(current_stock["numOfRisingDays"])
+                    
+                    # Handle the case where accumulatedChange is "-"
                     current_change = 0 if current_stock["accumulatedChange"] == "-" else float(current_stock["accumulatedChange"])
+                    
                     if new_change > 0:
                         if current_rising_days < 0:
                             rising_days = 1
@@ -69,21 +75,27 @@ def write_or_update_to_mongo(page_data):
                             incremental_change = current_change + new_change
                     else:
                         if new_change < 0:
-                            if current_rising_days > 0:    
+                            if current_rising_days > 0:
                                 rising_days = -1
                                 incremental_change = new_change
-                            else:            
+                            else:
                                 rising_days = current_rising_days - 1
                                 incremental_change = current_change + new_change
                         else:
                             rising_days = current_rising_days
                             incremental_change = current_change
                 except Exception as e:
-                    print(f"Error fetching data row: {e}")
+                    print(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
+                    continue
+            else:
+            # If stock is not found in the DB, initialize values
+                rising_days = 0
+                incremental_change = 0
+
         except Exception as e:
-            print(f"Error in making request to mongo: {e}")
-            # else:
-            #     print("Stock {} was not found in DB".format(data['serial_number']))        
+            print(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
+        continue
+
         try:
             collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
                 "ticker": data["ticker"],
@@ -96,11 +108,11 @@ def write_or_update_to_mongo(page_data):
                 "price": data["price"],
                 "change": data["change"],
                 "volume": data["volume"],
-                "numOfRisingDays": "0" if rising_days is None else str(rising_days),
+                "numOfRisingDays": str(rising_days),
                 "accumulatedChange": str(incremental_change)
-                }}, upsert=True)
+            }}, upsert=True)
         except Exception as e:
-                print(f"Error writing data row: {e}")
+            print(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
     print(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
 
 
