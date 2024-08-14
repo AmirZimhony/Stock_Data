@@ -13,7 +13,7 @@ Beginner's Instructions:
    `python main.py`    
 """
 
-import random
+
 import requests
 import time
 from bs4 import BeautifulSoup
@@ -23,7 +23,7 @@ from pymongo import MongoClient
 # Constants for MongoDB connection
 CONNECTION_URI = "mongodb+srv://amiros:AI6i7ZzZHgM5H5H0@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority" # Your MongoDB connection URI
 DB_NAME = "stock_data" # Your database name
-COLLECTION_NAME = "stockss" # Your collection/ table name
+COLLECTION_NAME = "stocks" # Your collection/ table name
 
 # Set up MongoDB connection
 client = MongoClient(CONNECTION_URI)
@@ -51,8 +51,7 @@ def write_or_update_to_mongo(page_data):
     
     # Update Records
 
-
-    for data in page_data:
+    for data in page_data:   
         try:
             current_stock = collection.find_one({"serial_number": data["serial_number"]})
             if current_stock is not None:
@@ -90,13 +89,7 @@ def write_or_update_to_mongo(page_data):
             else:
             # If stock is not found in the DB, initialize values
                 rising_days = 0
-                incremental_change = 0
-
-        except Exception as e:
-            print(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
-        continue
-
-        try:
+                incremental_change = 0   
             collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
                 "ticker": data["ticker"],
                 "company": data["company"],
@@ -112,7 +105,25 @@ def write_or_update_to_mongo(page_data):
                 "accumulatedChange": str(incremental_change)
             }}, upsert=True)
         except Exception as e:
-            print(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
+            print(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
+        continue
+
+        # try:
+        #     collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
+        #         "ticker": data["ticker"],
+        #         "company": data["company"],
+        #         "sector": data["sector"],
+        #         "industry": data["industry"],
+        #         "country": data["country"],
+        #         "market_cap": data["market_cap"],
+        #         "pe_ratio": data["pe_ratio"],
+        #         "price": data["price"],
+        #         "change": data["change"],
+        #         "volume": data["volume"],
+        #         "accumulatedChange": str(incremental_change)
+        #     }}, upsert=True)
+        # except Exception as e:
+        #     print(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
     print(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
 
 
@@ -161,7 +172,6 @@ def get_data(start):
     page_data = []
     table = soup.select_one("table.screener_table")
     rows = table.select("tr[valign='top']")
-    
     for tr in rows:
         try:
             json_data = {
