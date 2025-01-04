@@ -20,8 +20,18 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
 
+
+import json
+
+with open('/secret.json') as f:
+    secret = json.load(f)
+
+db_username = secret['db_username']
+db_password = secret['db_password']
+
+
 # Constants for MongoDB connection
-CONNECTION_URI = "mongodb+srv://amiros:AI6i7ZzZHgM5H5H0@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority" # Your MongoDB connection URI
+CONNECTION_URI = f"mongodb+srv://{db_username}:{db_password}@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority" # Your MongoDB connection URI
 DB_NAME = "stock_data" # Your database name
 COLLECTION_NAME = "stocks" # Your collection/ table name
 
