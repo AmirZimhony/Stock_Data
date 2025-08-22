@@ -1,0 +1,20 @@
+{
+  "prod": {
+    "test_stocks": [
+      "AAPL",
+      "MSFT"
+    ],
+    "DB_name": "stock_data",
+    "collection_name": "stocks",
+    "end_index": 10501
+  },
+  "dev": {
+    "test_stocks": [
+      "AAPL",
+      "MSFT"
+    ],
+    "DB_name": "stock_test1",
+    "collection_name": "stocks_test",
+    "end_index": 501
+  }
+}
