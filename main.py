@@ -67,8 +67,8 @@ collection = db[COLLECTION_NAME]
          
 def main():  
     print("Checking trading status...")
-    trading1 = check_if_trading_happened(config["test_stocks"][0])
-    trading2 = check_if_trading_happened(config["test_stocks"][1])
+    trading1 = check_if_trading_happened(config["sample_stocks"][0])
+    trading2 = check_if_trading_happened(config["sample_stocks"][1])
     print(f"AAPL trading: {trading1}")
     print(f"MSFT trading: {trading2}")
     
