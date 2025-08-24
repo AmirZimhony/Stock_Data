@@ -1,6 +1,6 @@
 {
   "prod": {
-    "test_stocks": [
+    "sample_stocks": [
       "AAPL",
       "MSFT"
     ],
@@ -9,7 +9,7 @@
     "end_index": 10501
   },
   "dev": {
-    "test_stocks": [
+    "sample_stocks": [
       "AAPL",
       "MSFT"
     ],
