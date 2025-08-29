@@ -6,6 +6,10 @@ import requests
 import time
 from bs4 import BeautifulSoup
 import yfinance as yf
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 def write_or_update_to_mongo(page_data, collection):
     """
@@ -61,7 +65,7 @@ def write_or_update_to_mongo(page_data, collection):
                             rising_days = current_rising_days
                             incremental_change = current_change
                 except Exception as e:
-                    print(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
+                    logger.error(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
                     continue
             else:
             # If stock is not found in the DB, initialize values
@@ -82,7 +86,7 @@ def write_or_update_to_mongo(page_data, collection):
                 "accumulatedChange": str(incremental_change)
             }}, upsert=True)
         except Exception as e:
-            print(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
+            logger.error(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
         continue
 
         # try:
@@ -100,8 +104,8 @@ def write_or_update_to_mongo(page_data, collection):
         #         "accumulatedChange": str(incremental_change)
         #     }}, upsert=True)
         # except Exception as e:
-        #     print(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
-    print(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
+        #     logger.error(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
+    logger.info(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
 
 
 def get_data(start, collection):
@@ -137,14 +141,14 @@ def get_data(start, collection):
         trial_count = 0
         while response.status_code != 200:
             if trial_count < 5:
-                print(f"Error making request: {response.status_code}")
+                logger.warning(f"Error making request: {response.status_code}, retrying...")
                 response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
                 trial_count += 1
             else:
-                print(f"Error making request more than 5 times: {response.status_code}")
+                logger.error(f"Error making request more than 5 times: {response.status_code}")
                 return
     except Exception as e:
-            print(f"Error making request: {e}")
+            logger.error(f"Error making request: {e}")
             return
     soup = BeautifulSoup(response.text, 'html.parser')
     page_data = []
@@ -167,11 +171,20 @@ def get_data(start, collection):
             }
             page_data.append(json_data)
         except Exception as e:
-            print(f"Error processing data row: {e}")
+            logger.error(f"Error processing data row: {e}")
     
     if page_data:
-        print(f"Retrieved data for {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
+        logger.info(f"Retrieved data for {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
         write_or_update_to_mongo(page_data, collection)
+        
+        # Aggressive memory cleanup
+        page_data.clear()
+        soup.decompose()  # Destroy BeautifulSoup tree
+        del soup, table, rows, page_data
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
 
 def check_if_trading_happened(ticker):
     ticker = yf.Ticker(ticker)
