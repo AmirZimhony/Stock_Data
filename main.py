@@ -44,8 +44,8 @@ db_password = os.getenv('DB_PASSWORD')
 
 # Constants for MongoDB connection
 CONNECTION_URI = f"mongodb+srv://{db_username}:{db_password}@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority" # Your MongoDB connection URI
-DB_NAME = config["DB_name"]  # Get database name from config
-COLLECTION_NAME = config["collection_name"]  # Get collection/table name from config
+DB_NAME = config["DB_name"] if "DB_name" in config else "stock_test1" # Get database name from config
+COLLECTION_NAME = config["collection_name"] if "collection_name" in config else "stocks_test"  # Get collection/table name from config
 
 # Set up MongoDB connection with memory-efficient settings
 client = MongoClient(CONNECTION_URI, maxPoolSize=10, minPoolSize=1)  # Limit connection pool
