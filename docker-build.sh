@@ -11,11 +11,11 @@ GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "nogit")
 
 # Create unique tag combining timestamp, git hash, and random build ID
 if [ -n "$DOCKER_REGISTRY" ]; then
-    UNIQUE_TAG="${DOCKER_REGISTRY}/projects/nasdaq-stocks:${TIMESTAMP}_${GIT_HASH}_${BUILD_ID}"
-    LATEST_TAG="${DOCKER_REGISTRY}/projects/nasdaq-stocks:latest"
+    UNIQUE_TAG="${DOCKER_REGISTRY}/projects:nasdaq_stocks_${TIMESTAMP}_${GIT_HASH}_${BUILD_ID}"
+    LATEST_TAG="${DOCKER_REGISTRY}/projects:nasdaq_stocks_latest"
 else
-    UNIQUE_TAG="projects/nasdaq-stocks:${TIMESTAMP}_${GIT_HASH}_${BUILD_ID}"
-    LATEST_TAG="projects/nasdaq-stocks:latest"
+    UNIQUE_TAG="projects:nasdaq_stocks_${TIMESTAMP}_${GIT_HASH}_${BUILD_ID}"
+    LATEST_TAG="projects:nasdaq_stocks_latest"
 fi
 
 # Multi-platform build (Intel + ARM64)
