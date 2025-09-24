@@ -1,0 +1,22 @@
+{
+    "prod": {
+      "sample_stocks": [
+        "AAPL",
+        "ABNB"
+      ],
+      "DB_name": "stock_data",
+      "collection_name": "stocks",
+      "max_workers": 30,
+      "end_index": 10501
+    },
+    "dev": {
+      "sample_stocks": [
+        "AAPL",
+        "ABNB"
+      ],
+      "DB_name": "stock_test1",
+      "collection_name": "stocks_test",
+      "max_workers": 5,
+      "end_index": 501
+    }
+  }

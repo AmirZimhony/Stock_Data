@@ -1,3 +1,7 @@
-# pymongo
-# time
-# requests 
+pymongo
+requests 
+beautifulsoup4
+yfinance
+pandas
+python-dotenv
+numpy
