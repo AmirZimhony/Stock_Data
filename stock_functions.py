@@ -6,6 +6,31 @@ import requests
 import time
 from bs4 import BeautifulSoup
 import yfinance as yf
+import threading
+from logging_config import get_logger
+
+# Get logger for this module
+logger = get_logger(__name__)
+
+# Thread-safe aggregate counters across the whole run
+_aggregate_lock = threading.Lock()
+_aggregate_counts = {
+    "total_read": 0,
+    "inserted": 0,
+    "updated": 0,
+}
+
+
+def reset_aggregate_counts():
+    with _aggregate_lock:
+        _aggregate_counts["total_read"] = 0
+        _aggregate_counts["inserted"] = 0
+        _aggregate_counts["updated"] = 0
+
+
+def get_aggregate_counts():
+    with _aggregate_lock:
+        return dict(_aggregate_counts)
 
 def write_or_update_to_mongo(page_data, collection):
     """
@@ -18,15 +43,11 @@ def write_or_update_to_mongo(page_data, collection):
         page_data (list): A list of dictionaries, each representing stock information.
         collection: MongoDB collection object for database operations.
     """
-    # serial_numbers = [x['serial_number'] for x in page_data]
+
     
-    # # Delete existing records
-    # collection.delete_many({"serial_number": {"$in": serial_numbers}})
-    
-    # # Insert new records
-    # collection.insert_many(page_data, ordered=False)
-    
-    # Update Records
+
+    inserted_count = 0
+    updated_count = 0
 
     for data in page_data:   
         try:
@@ -61,13 +82,13 @@ def write_or_update_to_mongo(page_data, collection):
                             rising_days = current_rising_days
                             incremental_change = current_change
                 except Exception as e:
-                    print(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
+                    logger.error(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
                     continue
             else:
             # If stock is not found in the DB, initialize values
                 rising_days = 0
                 incremental_change = 0   
-            collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
+            result = collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
                 "ticker": data["ticker"],
                 "company": data["company"],
                 "sector": data["sector"],
@@ -81,27 +102,27 @@ def write_or_update_to_mongo(page_data, collection):
                 "numOfRisingDays": str(rising_days),
                 "accumulatedChange": str(incremental_change)
             }}, upsert=True)
+            if result.upserted_id is not None:
+                inserted_count += 1
+            else:
+                updated_count += result.modified_count
         except Exception as e:
-            print(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
+            logger.error(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
         continue
 
-        # try:
-        #     collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
-        #         "ticker": data["ticker"],
-        #         "company": data["company"],
-        #         "sector": data["sector"],
-        #         "industry": data["industry"],
-        #         "country": data["country"],
-        #         "market_cap": data["market_cap"],
-        #         "pe_ratio": data["pe_ratio"],
-        #         "price": data["price"],
-        #         "change": data["change"],
-        #         "volume": data["volume"],
-        #         "accumulatedChange": str(incremental_change)
-        #     }}, upsert=True)
-        # except Exception as e:
-        #     print(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
-    print(f"Data written to MongoDB for page {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
+    try:
+        total_read = len(page_data)
+    except Exception:
+        total_read = 0
+
+    # Update global aggregates
+    with _aggregate_lock:
+        _aggregate_counts["total_read"] += total_read
+        _aggregate_counts["inserted"] += inserted_count
+        _aggregate_counts["updated"] += updated_count
+
+    # Per-page completion log without per-page totals
+    logger.info(f"Upsert {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}")
 
 
 def get_data(start, collection):
@@ -137,14 +158,14 @@ def get_data(start, collection):
         trial_count = 0
         while response.status_code != 200:
             if trial_count < 5:
-                print(f"Error making request: {response.status_code}")
+                logger.warning(f"Error making request: {response.status_code}, retrying...")
                 response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
                 trial_count += 1
             else:
-                print(f"Error making request more than 5 times: {response.status_code}")
+                logger.error(f"Error making request more than 5 times: {response.status_code}")
                 return
     except Exception as e:
-            print(f"Error making request: {e}")
+            logger.error(f"Error making request: {e}")
             return
     soup = BeautifulSoup(response.text, 'html.parser')
     page_data = []
@@ -167,16 +188,46 @@ def get_data(start, collection):
             }
             page_data.append(json_data)
         except Exception as e:
-            print(f"Error processing data row: {e}")
+            logger.error(f"Error processing data row: {e}")
     
     if page_data:
-        print(f"Retrieved data for {page_data[0]['serial_number']} to {page_data[-1]['serial_number']}")
+        logger.info(f"Fetched {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}")
         write_or_update_to_mongo(page_data, collection)
+        
+        # Aggressive memory cleanup
+        page_data.clear()
+        soup.decompose()  # Destroy BeautifulSoup tree
+        del soup, table, rows, page_data
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
 
-def check_if_trading_happened(ticker):
-    ticker = yf.Ticker(ticker)
-    data = ticker.history(period="1d")
+def check_if_trading_happened(ticker, collection):
+
+    # Get last price from yfinance
+    yf_ticker = yf.Ticker(ticker)
+    data = yf_ticker.history(period="1d")
     if data.empty:
         return False
+
+    yf_last_price = data['Close'].iloc[-1]
+
+    # Get last price from MongoDB
+    last_doc = collection.find_one({'ticker': ticker}, sort=[('serial_number', -1)])
+    if not last_doc or 'price' not in last_doc:
+        # No data in DB, so treat as trading happened
+        return True
+
+    db_last_price = last_doc['price']
+    yf_p2 = round(float(yf_last_price), 2)
+    db_p2 = round(float(db_last_price), 2)
+    logger.info(f"{ticker} prices - yf={yf_p2:.2f}, db={db_p2:.2f}")
+    
+        
+
+    # Compare prices
+    if yf_p2 == db_p2:
+        return False  # No trading happened
     else:
-        return True        
+        return True

@@ -1,29 +1,17 @@
 """
-Author: Gunit Bindal (https://upwork.com/freelancers/gunitb)
-Author Email: thegbdevelopers@gmail.com
+Stock data scraper main application.
 
 This script fetches stock data from the Finviz website and stores it in MongoDB.
-
-Beginner's Instructions:
-1. Download and install Python from https://www.python.org/downloads/
-2. Install the required packages by running the following command in your terminal:
-   `pip install -r requirements.txt`
-3. Replace the `CONNECTION_URI`, `DB_NAME`, and `COLLECTION_NAME` constants with your MongoDB connection details.
-4. Run the script using the following command:
-   `python main.py`    
 """
 
-
-import requests
-import time
-from bs4 import BeautifulSoup
+import json
+import os
+import argparse
+from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
-import os
-from dotenv import load_dotenv
-import argparse
-import json
-from stock_functions import get_data, write_or_update_to_mongo, check_if_trading_happened
+from logging_config import get_logger
+from stock_functions import get_data, check_if_trading_happened, reset_aggregate_counts, get_aggregate_counts
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--env", help="Environment to run the script in")
@@ -40,7 +28,8 @@ else:
 print(config)
 
 
-
+# Get logger for this module
+logger = get_logger(__name__)
 
 load_dotenv()
 
@@ -48,10 +37,12 @@ db_username = os.getenv('DB_USERNAME')
 db_password = os.getenv('DB_PASSWORD')
 
 
-# Constants for MongoDB connection
-CONNECTION_URI = f"mongodb+srv://{db_username}:{db_password}@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority" # Your MongoDB connection URI
-DB_NAME = "stock_data" # Your database name
-COLLECTION_NAME = "stocks" # Your collection/ table name
+
+
+# MongoDB connection
+CONNECTION_URI = f"mongodb+srv://{db_username}:{db_password}@stockycluster.qni7i.mongodb.net/myFirstDatabase?retryWrites=true&w=majority"
+DB_NAME = config["DB_name"]
+COLLECTION_NAME = config["collection_name"]
 
 # Set up MongoDB connection
 client = MongoClient(CONNECTION_URI)
@@ -59,27 +50,32 @@ db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
 
 
+def main():
 
-
-
-
-# Execute the data retrieval in a multi-threaded manner to improve efficiency
-         
-def main():  
-    print("Checking trading status...")
-    trading1 = check_if_trading_happened(config["sample_stocks"][0])
-    trading2 = check_if_trading_happened(config["sample_stocks"][1])
-    print(f"AAPL trading: {trading1}")
-    print(f"MSFT trading: {trading2}")
-    
+    trading1 = check_if_trading_happened(config["sample_stocks"][0], collection)
+    trading2 = check_if_trading_happened(config["sample_stocks"][1], collection)
     if trading1 and trading2:
-        print("Both stocks are trading, starting data collection...")
-        with ThreadPoolExecutor(max_workers=50) as executor:
-            # executor.map(get_data, range(1, 9501, 20))
-            executor.map(lambda x: get_data(x, collection), range(1, config["end_index"], 20))
-        executor.shutdown(wait=True)  
+        logger.info("Both stocks are trading, starting data collection...")
     else:
-        print("No trading happened, skipping data retrieval")  
+        logger.info("One or both stocks are not trading, skipping data collection...")
+        return
+
+    """Main function to run the stock data scraper."""
+    logger.info("Starting stock data scraping process")
+    
+    # Start multi-threaded scraping
+    max_workers = config["max_workers"]
+    logger.info(f"Starting multi-threaded data scraping with {max_workers} workers")
+    
+    reset_aggregate_counts()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Scrape data from pages 1 to 9501, stepping by 20
+        executor.map(lambda start: get_data(start, collection), range(1, config["end_index"], 20))
+    
+    totals = get_aggregate_counts()
+    logger.info(f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}")
+
 
 if __name__ == "__main__":
     main() 

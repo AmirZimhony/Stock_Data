@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  stock-scraper:
+    build: .
+    container_name: stock-data-scraper
+    environment:
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
+      - CONTAINER_ENV=true
+    volumes:
+      - ./logs:/app/logs
+      - ./secret.json:/app/secret.json:ro
+    restart: unless-stopped
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    driver: bridge

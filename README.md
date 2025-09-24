@@ -1,157 +1,187 @@
 # Stock Data Scraper
 
-A Python script that fetches stock data from the Finviz website and stores it in MongoDB. The script tracks stock price changes, rising/falling days, and accumulated changes over time.
+A Python application that scrapes stock data from Finviz and stores it in MongoDB with trend analysis.
 
-## Purpose
 
-This script:
-- Scrapes stock data from Finviz screener pages
-- Stores stock information in MongoDB with change tracking
-- Calculates consecutive rising/falling days for each stock
-- Tracks accumulated price changes over time
-- Uses multi-threading for efficient data collection
+This script fetches stock data from the Finviz website and stores it in MongoDB.
 
-## Prerequisites
+Beginner's Instructions:
+1. Download and install Python from https://www.python.org/downloads/
+2. Install the required packages by running the following command in your terminal:
+   `pip install -r requirements.txt`
+3. Replace the `CONNECTION_URI`, `DB_NAME`, and `COLLECTION_NAME` constants with your MongoDB connection details.
+4. Run the script using the following command:
+   `python main.py`    
+"""
 
-- Python 3.7+
-- MongoDB database (local or cloud)
-- Virtual environment (recommended)
+## Features
 
-## Setup
+- **Multi-threaded scraping** from Finviz screener
+- **MongoDB storage** with trend tracking (rising days, accumulated change)
+- **Container-optimized logging** (stdout + optional file logging)
+- **Proxy support** for reliable data fetching
+- **Error handling** with retry logic
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Stock_Data
+## Quick Start
+
+### Option 1: Docker (Recommended)
+
+1. **Configure MongoDB:**
+   - Create `secret.json` with your MongoDB credentials:
+   ```json
+   {
+     "db_username": "your_username",
+     "db_password": "your_password"
+   }
    ```
 
-2. **Create and activate virtual environment**
+2. **Run with Docker Compose:**
    ```bash
+   docker-compose up -d
+   ```
+
+3. **View logs:**
+   ```bash
+   docker-compose logs -f
+   ```
+
+### Option 2: Local Python
+
+1. **Create and activate virtual environment:**
+   ```bash
+   # Create virtual environment
    python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   
+   # Activate virtual environment
+   # On Windows:
+   venv\Scripts\activate
+   # On macOS/Linux:
+   source venv/bin/activate
    ```
 
-3. **Install dependencies**
+2. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Configure environment variables**
-   Create a `.env` file in the project root:
-   ```env
-   MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority
-   DB_NAME=stock_data
-   COLLECTION_NAME=stocks
+3. **Configure MongoDB:**
+   - Create `secret.json` with your MongoDB credentials:
+   ```json
+   {
+     "db_username": "your_username",
+     "db_password": "your_password"
+   }
    ```
 
-5. **Configure settings**
-   Edit `config.json` to set:
-   - `test_stocks`: Stocks to check for trading activity
-   - `end_index`: Number of stocks to process
-   - Environment-specific settings (dev/prod)
+4. **Run the scraper:**
+   ```bash
+   python main.py
+   ```
 
-## Usage
-
-### Basic Usage
-```bash
-# Run with development settings
-python main.py --env dev
-
-# Run with production settings  
-python main.py --env prod
-```
-
-### What the script does:
-1. Checks if trading is happening (using test stocks)
-2. If trading detected, scrapes Finviz stock data
-3. Updates MongoDB with new stock information
-4. Calculates rising/falling day streaks
-5. Tracks accumulated price changes
+5. **Deactivate virtual environment when done:**
+   ```bash
+   deactivate
+   ```
 
 ## Configuration
 
-### Environment Settings (`config.json`)
-```json
-{
-  "dev": {
-    "test_stocks": ["AAPL", "MSFT"],
-    "DB_name": "stock_test1", 
-    "collection_name": "stocks_test",
-    "end_index": 501
-  },
-  "prod": {
-    "test_stocks": ["AAPL", "MSFT"],
-    "DB_name": "stock_data",
-    "collection_name": "stocks", 
-    "end_index": 10501
-  }
-}
-```
+### Environment Variables
 
-### Environment Variables (`.env`)
-- `MONGO_URI`: MongoDB connection string
-- `DB_NAME`: Database name (optional, uses config)
-- `COLLECTION_NAME`: Collection name (optional, uses config)
-
-## Data Structure
-
-Each stock document contains:
-- `serial_number`: Unique identifier
-- `ticker`: Stock symbol
-- `company`: Company name
-- `sector`: Business sector
-- `industry`: Industry classification
-- `country`: Country of origin
-- `market_cap`: Market capitalization
-- `pe_ratio`: Price-to-earnings ratio
-- `price`: Current stock price
-- `change`: Daily price change percentage
-- `volume`: Trading volume
-- `numOfRisingDays`: Consecutive rising/falling days (positive/negative)
-- `accumulatedChange`: Total accumulated change during streak
-
-## Testing
-
-Run the test suite:
 ```bash
-pytest tests/
+# Logging
+LOG_LEVEL=INFO              # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_DIR=/app/logs           # Optional: directory for log files
+CONTAINER_ENV=true          # Enable container-optimized logging
+
+# MongoDB (or use secret.json)
+DB_USERNAME=your_username
+DB_PASSWORD=your_password
 ```
 
-## File Structure
+### Docker Configuration
 
-- `main.py`: Main script with configuration and orchestration
-- `stock_functions.py`: Core data scraping and processing functions
-- `config.json`: Environment-specific configuration
-- `requirements.txt`: Python dependencies
-- `tests/`: Test files
-- `.env`: Environment variables (create this file)
+The application includes Docker configuration for Linux AMD64:
 
-## Troubleshooting
+- **Dockerfile**: Multi-stage build with Python 3.11 slim
+- **docker-compose.yml**: Easy deployment with volume mounts
+- **.dockerignore**: Optimized build context
 
-### Common Issues
+**Docker commands:**
+```bash
+# Build image
+docker build -t stock-scraper .
 
-1. **Module not found errors**
-   - Make sure virtual environment is activated
-   - Run `pip install -r requirements.txt`
+# Run container
+docker run -d --name stock-scraper \
+  -v $(pwd)/secret.json:/app/secret.json:ro \
+  -v $(pwd)/logs:/app/logs \
+  stock-scraper
 
-2. **MongoDB connection errors**
-   - Check your `.env` file has correct `MONGO_URI`
-   - Verify database credentials and network access
-
-3. **No trading detected**
-   - Script checks if test stocks have trading activity
-   - If markets are closed, script will skip data collection
-
-4. **Proxy/Network errors**
-   - Script uses proxy for Finviz requests
-   - Check proxy settings in `stock_functions.py`
-
-### Debug Mode
-Add print statements or enable logging to see detailed execution:
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
+# Stop container
+docker stop stock-scraper
 ```
+
+### MongoDB Setup
+
+The application connects to MongoDB Atlas using the credentials in `/secret.json`:
+- Database: `stock_data`
+- Collection: `stocks`
+
+## Project Structure
+
+```
+├── main.py                 # Main scraper with multi-threading
+├── stock_functions.py      # Core scraping and database functions
+├── logging_config.py       # Simple logging configuration
+├── Data_extracter.py       # Alternative scraper implementation
+├── requirements.txt        # Python dependencies
+└── tests/                  # Test files
+```
+
+## Data Schema
+
+Each stock record includes:
+- Basic info: ticker, company, sector, industry, country
+- Market data: price, change, volume, market cap, P/E ratio
+- Trend analysis: `numOfRisingDays`, `accumulatedChange`
+
+## Logging
+
+The application uses container-optimized logging:
+- **Stdout logging** (required for containers/Airflow)
+- **Optional file logging** if `LOG_DIR` is writable
+- **Log rotation** for file logs
+- **Reduced noise** from third-party libraries
+
+## Development
+
+### Running Tests
+```bash
+python -m pytest tests/
+```
+
+## Build an image and push to Docker Hub
+```bash
+./docker-build.sh
+```
+
+### Logging Configuration
+See [LOGGING_CONFIG.md](LOGGING_CONFIG.md) for detailed logging setup.
+
+## Requirements
+
+- Python 3.7+
+- MongoDB Atlas account
+- Internet connection for web scraping
+
+## Dependencies
+
+- `requests` - HTTP requests
+- `beautifulsoup4` - HTML parsing
+- `pymongo` - MongoDB operations
+- `yfinance` - Stock data validation
+- `pandas` - Data processing
+- `numpy` - Numerical operations
 
 ## License
 
