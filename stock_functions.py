@@ -36,79 +36,196 @@ def write_or_update_to_mongo(page_data, collection):
     """
     Writes or updates stock information in MongoDB.
     
-    This function deletes existing records with the same serial numbers from the database and inserts new ones.
-    It handles the insertion in a bulk operation to optimize performance.
+    This function uses atomic operations with optimistic locking and price-based duplicate detection
+    to prevent race conditions and ensure rising_days is calculated correctly.
     
     Args:
         page_data (list): A list of dictionaries, each representing stock information.
         collection: MongoDB collection object for database operations.
     """
-
-    
-
     inserted_count = 0
     updated_count = 0
 
     for data in page_data:   
         try:
             current_stock = collection.find_one({"serial_number": data["serial_number"]})
+            
             if current_stock is not None:
+                # Existing stock - check for duplicate and update with atomic operations
                 try:
-                    # Handle the case where change is "-"
-                    new_change = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    # Get current price from database
+                    current_price = current_stock.get("price")
+                    new_price = data.get("price")
                     
-                    # Handle the case where numOfRisingDays is "-"
-                    current_rising_days = 0 if current_stock["numOfRisingDays"] == "-" else int(current_stock["numOfRisingDays"])
+                    # DUPLICATE DETECTION: Check if price actually changed
+                    # If prices are the same (or very close), this is a duplicate - skip incrementing rising_days
+                    price_unchanged = False
+                    if current_price is not None and new_price is not None:
+                        try:
+                            current_price_float = float(current_price)
+                            new_price_float = float(new_price)
+                            # If prices are within 1 cent, consider them the same (handles rounding)
+                            if abs(current_price_float - new_price_float) < 0.01:
+                                price_unchanged = True
+                        except (ValueError, TypeError):
+                            # If price conversion fails, proceed with update
+                            pass
                     
-                    # Handle the case where accumulatedChange is "-"
-                    current_change = 0 if current_stock["accumulatedChange"] == "-" else float(current_stock["accumulatedChange"])
+                    if price_unchanged:
+                        # Price hasn't changed - update other fields but DON'T increment rising_days
+                        # This prevents duplicate processing from incrementing the counter multiple times
+                        result = collection.update_one(
+                            {"serial_number": data["serial_number"]},
+                            {"$set": {
+                                "ticker": data["ticker"],
+                                "company": data["company"],
+                                "sector": data["sector"],
+                                "industry": data["industry"],
+                                "country": data["country"],
+                                "market_cap": data["market_cap"],
+                                "pe_ratio": data["pe_ratio"],
+                                "volume": data["volume"],
+                                "change": data["change"],
+                                # DON'T update price, numOfRisingDays, or accumulatedChange
+                            }}
+                        )
+                        if result.modified_count > 0:
+                            updated_count += 1
+                        continue
                     
-                    if new_change > 0:
+                    # Price changed - proceed with calculating new rising_days
+                    # Get current state
+                    current_rising_days_str = current_stock.get("numOfRisingDays", "-")
+                    current_rising_days = 0 if current_rising_days_str == "-" else int(current_rising_days_str)
+                    
+                    current_change_str = current_stock.get("accumulatedChange", "-")
+                    current_change = 0 if current_change_str == "-" else float(current_change_str)
+                    
+                    # Calculate actual price change percentage from stored prices (more reliable than Finviz change)
+                    try:
+                        current_price_float = float(current_price)
+                        new_price_float = float(new_price)
+                        if current_price_float > 0:
+                            actual_price_change_pct = ((new_price_float - current_price_float) / current_price_float) * 100
+                        else:
+                            # Fallback to Finviz change if price is 0 or invalid
+                            actual_price_change_pct = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    except (ValueError, TypeError, ZeroDivisionError):
+                        # Fallback to Finviz change if price calculation fails
+                        actual_price_change_pct = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    
+                    # Calculate new rising_days based on actual price change
+                    if actual_price_change_pct > 0:
+                        # Price increased
                         if current_rising_days < 0:
-                            rising_days = 1
-                            incremental_change = new_change
+                            # Transition from falling to rising: reset to 1
+                            new_rising_days = 1
+                            new_accumulated_change = actual_price_change_pct
                         else:
-                            rising_days = current_rising_days + 1
-                            incremental_change = current_change + new_change
+                            # Continue rising: increment
+                            new_rising_days = current_rising_days + 1
+                            new_accumulated_change = current_change + actual_price_change_pct
+                    elif actual_price_change_pct < 0:
+                        # Price decreased
+                        if current_rising_days > 0:
+                            # Transition from rising to falling: reset to -1
+                            new_rising_days = -1
+                            new_accumulated_change = actual_price_change_pct
+                        else:
+                            # Continue falling: decrement
+                            new_rising_days = current_rising_days - 1
+                            new_accumulated_change = current_change + actual_price_change_pct
                     else:
-                        if new_change < 0:
-                            if current_rising_days > 0:
-                                rising_days = -1
-                                incremental_change = new_change
-                            else:
-                                rising_days = current_rising_days - 1
-                                incremental_change = current_change + new_change
-                        else:
-                            rising_days = current_rising_days
-                            incremental_change = current_change
+                        # Price unchanged (shouldn't happen due to duplicate check above, but handle it)
+                        new_rising_days = current_rising_days
+                        new_accumulated_change = current_change
+                    
+                    # ATOMIC UPDATE with optimistic locking: only update if rising_days hasn't changed
+                    # This prevents race conditions when multiple threads process the same stock
+                    result = collection.update_one(
+                        {
+                            "serial_number": data["serial_number"],
+                            "numOfRisingDays": current_rising_days_str  # Only match if unchanged (optimistic lock)
+                        },
+                        {"$set": {
+                            "ticker": data["ticker"],
+                            "company": data["company"],
+                            "sector": data["sector"],
+                            "industry": data["industry"],
+                            "country": data["country"],
+                            "market_cap": data["market_cap"],
+                            "pe_ratio": data["pe_ratio"],
+                            "price": data["price"],
+                            "change": data["change"],
+                            "volume": data["volume"],
+                            "numOfRisingDays": str(new_rising_days),
+                            "accumulatedChange": str(new_accumulated_change)
+                        }}
+                    )
+                    
+                    if result.modified_count > 0:
+                        updated_count += 1
+                    elif result.matched_count > 0:
+                        # Matched but not modified - likely all fields were already set to these values
+                        # This is fine, count as successful update (no-op)
+                        updated_count += 1
+                    else:
+                        # Optimistic lock failed - rising_days changed between read and update (race condition)
+                        # Another thread successfully updated it, so we skip this update
+                        logger.debug(f"Optimistic lock failed for serial {data['serial_number']} - race condition detected, skipping update")
+                        
                 except Exception as e:
                     logger.error(f"Error processing data for stock with serial number {data['serial_number']}: {e}")
                     continue
             else:
-            # If stock is not found in the DB, initialize values
-                rising_days = 0
-                incremental_change = 0   
-            result = collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
-                "ticker": data["ticker"],
-                "company": data["company"],
-                "sector": data["sector"],
-                "industry": data["industry"],
-                "country": data["country"],
-                "market_cap": data["market_cap"],
-                "pe_ratio": data["pe_ratio"],
-                "price": data["price"],
-                "change": data["change"],
-                "volume": data["volume"],
-                "numOfRisingDays": str(rising_days),
-                "accumulatedChange": str(incremental_change)
-            }}, upsert=True)
-            if result.upserted_id is not None:
-                inserted_count += 1
-            else:
-                updated_count += result.modified_count
+                # New stock - initialize values based on change percentage
+                try:
+                    # Get change percentage to determine initial rising/falling state
+                    new_change = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    
+                    if new_change > 0:
+                        # Stock is rising on first day
+                        initial_rising_days = 1
+                        initial_accumulated_change = new_change
+                    elif new_change < 0:
+                        # Stock is falling on first day
+                        initial_rising_days = -1
+                        initial_accumulated_change = new_change
+                    else:
+                        # No change on first day
+                        initial_rising_days = 0
+                        initial_accumulated_change = 0
+                except (ValueError, TypeError):
+                    # If change parsing fails, default to 0
+                    initial_rising_days = 0
+                    initial_accumulated_change = 0
+                
+                result = collection.update_one(
+                    {"serial_number": data["serial_number"]},
+                    {"$set": {
+                        "ticker": data["ticker"],
+                        "company": data["company"],
+                        "sector": data["sector"],
+                        "industry": data["industry"],
+                        "country": data["country"],
+                        "market_cap": data["market_cap"],
+                        "pe_ratio": data["pe_ratio"],
+                        "price": data["price"],
+                        "change": data["change"],
+                        "volume": data["volume"],
+                        "numOfRisingDays": str(initial_rising_days),
+                        "accumulatedChange": str(initial_accumulated_change)
+                    }},
+                    upsert=True
+                )
+                if result.upserted_id is not None:
+                    inserted_count += 1
+                else:
+                    updated_count += result.modified_count
+                    
         except Exception as e:
             logger.error(f"Error making request to MongoDB for stock with serial number {data['serial_number']}: {e}")
-        continue
+            continue
 
     try:
         total_read = len(page_data)

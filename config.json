@@ -7,7 +7,7 @@
       "DB_name": "stock_data",
       "collection_name": "stocks",
       "max_workers": 30,
-      "end_index": 10501
+      "end_index": 11500
     },
     "dev": {
       "sample_stocks": [
