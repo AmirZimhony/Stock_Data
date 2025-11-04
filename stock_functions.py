@@ -230,22 +230,6 @@ def write_or_update_to_mongo(page_data, collection):
             logger.error(f"Error making request to MongoDB for stock with ticker {data.get('ticker')}: {e}")
             continue
 
-        # try:
-        #     collection.update_one({"serial_number": data["serial_number"]}, {"$set": {
-        #         "ticker": data["ticker"],
-        #         "company": data["company"],
-        #         "sector": data["sector"],
-        #         "industry": data["industry"],
-        #         "country": data["country"],
-        #         "market_cap": data["market_cap"],
-        #         "pe_ratio": data["pe_ratio"],
-        #         "price": data["price"],
-        #         "change": data["change"],
-        #         "volume": data["volume"],
-        #         "accumulatedChange": str(incremental_change)
-        #     }}, upsert=True)
-        # except Exception as e:
-        #     logger.error(f"Error updating MongoDB for stock with serial number {data['serial_number']}: {e}")
     try:
         total_read = len(page_data)
     except Exception:
