@@ -48,7 +48,13 @@ def write_or_update_to_mongo(page_data, collection):
 
     for data in page_data:   
         try:
-            current_stock = collection.find_one({"ticker": data["ticker"]})
+            # Normalize ticker to uppercase for consistent matching (fixes case sensitivity issues)
+            ticker = data["ticker"].upper().strip() if data.get("ticker") else None
+            if not ticker:
+                logger.warning(f"Skipping record with missing or empty ticker: {data.get('serial_number', 'unknown')}")
+                continue
+            
+            current_stock = collection.find_one({"ticker": ticker})
             
             if current_stock is not None:
                 # Existing stock - check for duplicate and update with atomic operations
@@ -75,10 +81,10 @@ def write_or_update_to_mongo(page_data, collection):
                         # Price hasn't changed - update other fields but DON'T increment rising_days
                         # This prevents duplicate processing from incrementing the counter multiple times
                         result = collection.update_one(
-                            {"ticker": data["ticker"]},
+                            {"ticker": ticker},
                             {"$set": {
                                 "serial_number": data["serial_number"],
-                                "ticker": data["ticker"],
+                                "ticker": ticker,
                                 "company": data["company"],
                                 "sector": data["sector"],
                                 "industry": data["industry"],
@@ -145,12 +151,12 @@ def write_or_update_to_mongo(page_data, collection):
                     # This prevents race conditions when multiple threads process the same stock
                     result = collection.update_one(
                         {
-                            "ticker": data["ticker"],
+                            "ticker": ticker,
                             "numOfRisingDays": current_rising_days_str  # Only match if unchanged (optimistic lock)
                         },
                         {"$set": {
                             "serial_number": data["serial_number"],
-                            "ticker": data["ticker"],
+                            "ticker": ticker,
                             "company": data["company"],
                             "sector": data["sector"],
                             "industry": data["industry"],
@@ -174,10 +180,10 @@ def write_or_update_to_mongo(page_data, collection):
                     else:
                         # Optimistic lock failed - rising_days changed between read and update (race condition)
                         # Another thread successfully updated it, so we skip this update
-                        logger.debug(f"Optimistic lock failed for ticker {data['ticker']} - race condition detected, skipping update")
+                        logger.warning(f"Optimistic lock failed for ticker {ticker} - race condition detected, skipping update. This may indicate the stock needs manual review.")
                         
                 except Exception as e:
-                    logger.error(f"Error processing data for stock with ticker {data['ticker']}: {e}")
+                    logger.error(f"Error processing data for stock with ticker {ticker}: {e}", exc_info=True)
                     continue
             else:
                 # New stock - initialize values based on change percentage
@@ -203,10 +209,10 @@ def write_or_update_to_mongo(page_data, collection):
                     initial_accumulated_change = 0
                 
                 result = collection.update_one(
-                    {"ticker": data["ticker"]},
+                    {"ticker": ticker},
                     {"$set": {
                         "serial_number": data["serial_number"],
-                        "ticker": data["ticker"],
+                        "ticker": ticker,
                         "company": data["company"],
                         "sector": data["sector"],
                         "industry": data["industry"],
@@ -227,7 +233,8 @@ def write_or_update_to_mongo(page_data, collection):
                     updated_count += result.modified_count
                     
         except Exception as e:
-            logger.error(f"Error making request to MongoDB for stock with ticker {data.get('ticker')}: {e}")
+            ticker_str = ticker if 'ticker' in locals() else data.get('ticker', 'unknown')
+            logger.error(f"Error making request to MongoDB for stock with ticker {ticker_str}: {e}", exc_info=True)
             continue
 
         # try:
@@ -340,6 +347,11 @@ def get_data(start, collection):
         gc.collect()
 
 def check_if_trading_happened(ticker, collection):
+    # Normalize ticker to uppercase for consistent matching
+    ticker = ticker.upper().strip() if ticker else None
+    if not ticker:
+        logger.warning("check_if_trading_happened called with empty ticker")
+        return False
 
     # Get last price from yfinance
     yf_ticker = yf.Ticker(ticker)
