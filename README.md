@@ -179,7 +179,6 @@ See [LOGGING_CONFIG.md](LOGGING_CONFIG.md) for detailed logging setup.
 - `requests` - HTTP requests
 - `beautifulsoup4` - HTML parsing
 - `pymongo` - MongoDB operations
-- `yfinance` - Stock data validation
 - `pandas` - Data processing
 - `numpy` - Numerical operations
 
