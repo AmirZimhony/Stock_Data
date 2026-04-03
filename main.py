@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
 from logging_config import get_logger
-from stock_functions import get_data, check_if_trading_happened, reset_aggregate_counts, get_aggregate_counts
+from stock_functions import get_data, reset_aggregate_counts, get_aggregate_counts
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--env", help="Environment to run the script in")
@@ -51,15 +51,6 @@ collection = db[COLLECTION_NAME]
 
 
 def main():
-
-    trading1 = check_if_trading_happened(config["sample_stocks"][0], collection)
-    trading2 = check_if_trading_happened(config["sample_stocks"][1], collection)
-    if trading1 and trading2:
-        logger.info("Both stocks are trading, starting data collection...")
-    else:
-        logger.info("One or both stocks are not trading, skipping data collection...")
-        return
-
     """Main function to run the stock data scraper."""
     logger.info("Starting stock data scraping process")
     

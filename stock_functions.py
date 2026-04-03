@@ -5,7 +5,6 @@ Stock data processing functions for fetching and storing stock information.
 import requests
 import time
 from bs4 import BeautifulSoup
-import yfinance as yf
 import threading
 from logging_config import get_logger
 
@@ -330,36 +329,3 @@ def get_data(start, collection):
         import gc
         gc.collect()
 
-def check_if_trading_happened(ticker, collection):
-    # Normalize ticker to uppercase for consistent matching
-    ticker = ticker.upper().strip() if ticker else None
-    if not ticker:
-        logger.warning("check_if_trading_happened called with empty ticker")
-        return False
-
-    # Get last price from yfinance
-    yf_ticker = yf.Ticker(ticker)
-    data = yf_ticker.history(period="1d")
-    if data.empty:
-        return False
-
-    yf_last_price = data['Close'].iloc[-1]
-
-    # Get last price from MongoDB (ticker is the identity; no need to sort by serial)
-    last_doc = collection.find_one({'ticker': ticker})
-    if not last_doc or 'price' not in last_doc:
-        # No data in DB, so treat as trading happened
-        return True
-
-    db_last_price = last_doc['price']
-    yf_p2 = round(float(yf_last_price), 2)
-    db_p2 = round(float(db_last_price), 2)
-    logger.info(f"{ticker} prices - yf={yf_p2:.2f}, db={db_p2:.2f}")
-    
-        
-
-    # Compare prices
-    if yf_p2 == db_p2:
-        return False  # No trading happened
-    else:
-        return True
