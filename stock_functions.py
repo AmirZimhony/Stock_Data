@@ -2,6 +2,7 @@
 Stock data processing functions for fetching and storing stock information.
 """
 
+import os
 import requests
 import time
 from bs4 import BeautifulSoup
@@ -254,25 +255,29 @@ def write_or_update_to_mongo(page_data, collection):
 def get_data(start, collection):
     """
     Fetches stock data from the Finviz website and stores it in MongoDB.
-    
-    This function constructs the URL based on the starting index, makes an HTTP GET request to retrieve the page,
-    parses the HTML to extract stock information, and stores the data in MongoDB.
-    
+
+    Base URL from nasdaq_scraping_url; for start > 1 appends &R={start} (or ?R=).
+    proxy_url required. Parses HTML and stores rows in MongoDB.
+
     Args:
-        start (int): The starting index for stock data pagination.
+        start (int): Pagination offset (1 = first page, no R parameter).
         collection: MongoDB collection object for database operations.
     """
-    url = "https://finviz.com/screener.ashx?v=111" if start == 1 else f"https://finviz.com/screener.ashx?v=111&R={start}"
-    
-    # proxy_string = "http://qgzgcxvk:m5dkuqvxcnuy@"
-    # proxy_string = "http://"
-    # proxy_url = proxy_string + "38.170.189.191:9757"
-    proxy_url= 'http://qgzgcxvk-rotate:m5dkuqvxcnuy@p.webshare.io:80'
+    base = os.getenv("nasdaq_scraping_url")
+    if not base:
+        raise ValueError("nasdaq_scraping_url environment variable is required")
 
-    proxies = {
-    'http': proxy_url,
-    'https': proxy_url
-    }
+    proxy_url = os.getenv("proxy_url")
+    if not proxy_url:
+        raise ValueError("proxy_url environment variable is required")
+
+    if start == 1:
+        url = base
+    else:
+        sep = "&" if "?" in base else "?"
+        url = f"{base}{sep}R={start}"
+
+    proxies = {"http": proxy_url, "https": proxy_url}
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",

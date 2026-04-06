@@ -8,9 +8,11 @@ services:
       - LOG_LEVEL=INFO
       - LOG_DIR=/app/logs
       - CONTAINER_ENV=true
+      - db_url=${db_url}
+      - nasdaq_scraping_url=${nasdaq_scraping_url}
+      - proxy_url=${proxy_url}
     volumes:
       - ./logs:/app/logs
-      - ./secret.json:/app/secret.json:ro
     restart: unless-stopped
     networks:
       - stock-network

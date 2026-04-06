@@ -45,3 +45,7 @@ High level plan.xlsx
 
 # Virtual environments
 path/
+
+# Secrets (provide at runtime via env / compose)
+.env
+.env.*

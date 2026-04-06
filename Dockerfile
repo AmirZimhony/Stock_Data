@@ -23,9 +23,7 @@ ENV CONTAINER_ENV=true
 ENV LOG_LEVEL=INFO
 ENV LOG_DIR=/app/logs
 ENV APP_NAME=stock_data_app
-ENV SCRAPER_ENV=dev
 ENV PYTHONUNBUFFERED=1
 
-
-# Run the application
-CMD ["sh", "-c", "python main.py --env ${SCRAPER_ENV}"]
+# Uses dev.json from the image. Override `command` in compose for prod + CLI flags.
+CMD ["sh", "python", "main.py"]
