@@ -7,6 +7,7 @@ import requests
 import time
 from bs4 import BeautifulSoup
 import threading
+from datetime import datetime, timezone
 from logging_config import get_logger
 
 # Get logger for this module
@@ -45,6 +46,7 @@ def write_or_update_to_mongo(page_data, collection):
     """
     inserted_count = 0
     updated_count = 0
+    write_time = datetime.now(timezone.utc)
 
     for data in page_data:   
         try:
@@ -93,6 +95,7 @@ def write_or_update_to_mongo(page_data, collection):
                                 "pe_ratio": data["pe_ratio"],
                                 "volume": data["volume"],
                                 "change": data["change"],
+                                "timestamp": write_time,
                                 # DON'T update price, numOfRisingDays, or accumulatedChange
                             }}
                         )
@@ -167,7 +170,8 @@ def write_or_update_to_mongo(page_data, collection):
                             "change": data["change"],
                             "volume": data["volume"],
                             "numOfRisingDays": str(new_rising_days),
-                            "accumulatedChange": str(new_accumulated_change)
+                            "accumulatedChange": str(new_accumulated_change),
+                            "timestamp": write_time
                         }}
                     )
                     
@@ -223,7 +227,8 @@ def write_or_update_to_mongo(page_data, collection):
                         "change": data["change"],
                         "volume": data["volume"],
                         "numOfRisingDays": str(initial_rising_days),
-                        "accumulatedChange": str(initial_accumulated_change)
+                        "accumulatedChange": str(initial_accumulated_change),
+                        "timestamp": write_time
                     }},
                     upsert=True
                 )
@@ -250,6 +255,46 @@ def write_or_update_to_mongo(page_data, collection):
 
     # Per-page completion log without per-page totals
     logger.info(f"Upsert {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}")
+
+
+# Maps Finviz screener header text (lowercased) to our output field names.
+# Any other header (e.g. a new "Flag" column) is looked up here, found missing,
+# and therefore ignored automatically - regardless of where it sits in the row.
+_SCREENER_COLUMNS = {
+    "no.": "serial_number",
+    "ticker": "ticker",
+    "company": "company",
+    "sector": "sector",
+    "industry": "industry",
+    "country": "country",
+    "market cap": "market_cap",
+    "p/e": "pe_ratio",
+    "price": "price",
+    "change": "change",
+    "volume": "volume",
+}
+
+
+def _map_columns(table):
+    """Map known field names to their td index using the table's header row."""
+    header_cells = table.find("tr").find_all(["th", "td"])
+    columns = {}
+    for i, cell in enumerate(header_cells):
+        field = _SCREENER_COLUMNS.get(cell.get_text(strip=True).lower())
+        if field:
+            columns[field] = i
+    return columns
+
+
+def _cell_text(td):
+    """Visible text for a screener cell.
+
+    The ticker cell embeds a company-logo image whose accessibility text
+    repeats the ticker (e.g. "A" + "A" -> "AA"); prefer the visible
+    tab-link anchor when present to avoid that duplication.
+    """
+    link = td.find("a", class_="tab-link")
+    return link.get_text(strip=True) if link else td.get_text(strip=True)
 
 
 def get_data(start, collection):
@@ -284,38 +329,54 @@ def get_data(start, collection):
     }
     time.sleep(1)
 
-    try:
-        response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
-        trial_count = 0
-        while response.status_code != 200:
-            if trial_count < 5:
-                logger.warning(f"Error making request: {response.status_code}, retrying...")
-                response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
-                trial_count += 1
-            else:
-                logger.error(f"Error making request more than 5 times: {response.status_code}")
-                return
-    except Exception as e:
-            logger.error(f"Error making request: {e}")
-            return
+    response = None
+    for trial_count in range(6):
+        try:
+            response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
+            if response.status_code == 200:
+                break
+            logger.warning(f"Error making request: {response.status_code}, retrying...")
+        except Exception as e:
+            logger.warning(f"Error making request: {e}, retrying...")
+            response = None
+    else:
+        status = response.status_code if response is not None else "no response (connection/proxy error)"
+        logger.error(f"Error making request more than 5 times: {status}")
+        return
     soup = BeautifulSoup(response.text, 'html.parser')
     page_data = []
     table = soup.select_one("table.screener_table")
+    if table is None:
+        logger.error("Finviz screener table not found; unexpected page returned (blocked or layout changed?)")
+        return
+
+    columns = _map_columns(table)
+    missing = set(_SCREENER_COLUMNS.values()) - set(columns)
+    if missing:
+        logger.error(f"Finviz screener columns changed; missing expected fields: {sorted(missing)}")
+        return
+
     rows = table.select("tr[valign='top']")
+    if not rows:
+        logger.error("Finviz screener table has no data rows; unexpected page returned")
+        return
+
     for tr in rows:
         try:
+            tds = tr.find_all('td')
+            price_text = _cell_text(tds[columns['price']])
             json_data = {
-                'serial_number': int(tr.find_all('td')[0].get_text(strip=True)),
-                'ticker': tr.find_all('td')[1].get_text(strip=True),
-                'company': tr.find_all('td')[2].get_text(strip=True),
-                'sector': tr.find_all('td')[3].get_text(strip=True),
-                'industry': tr.find_all('td')[4].get_text(strip=True),
-                'country': tr.find_all('td')[5].get_text(strip=True),
-                'market_cap': tr.find_all('td')[6].get_text(strip=True),
-                'pe_ratio': tr.find_all('td')[7].get_text(strip=True),
-                'price': float(tr.find_all('td')[8].get_text(strip=True)) if tr.find_all('td')[8].get_text(strip=True).replace('.', '', 1).isdigit() else None,
-                'change': tr.find_all('td')[9].get_text(strip=True),
-                'volume': tr.find_all('td')[10].get_text(strip=True)
+                'serial_number': int(_cell_text(tds[columns['serial_number']])),
+                'ticker': _cell_text(tds[columns['ticker']]),
+                'company': _cell_text(tds[columns['company']]),
+                'sector': _cell_text(tds[columns['sector']]),
+                'industry': _cell_text(tds[columns['industry']]),
+                'country': _cell_text(tds[columns['country']]),
+                'market_cap': _cell_text(tds[columns['market_cap']]),
+                'pe_ratio': _cell_text(tds[columns['pe_ratio']]),
+                'price': float(price_text) if price_text.replace('.', '', 1).isdigit() else None,
+                'change': _cell_text(tds[columns['change']]),
+                'volume': _cell_text(tds[columns['volume']])
             }
             page_data.append(json_data)
         except Exception as e:
