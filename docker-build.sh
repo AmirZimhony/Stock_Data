@@ -32,6 +32,7 @@ docker buildx build \
     --build-arg BUILD_TIMESTAMP="${TIMESTAMP}" \
     --build-arg BUILD_ID="${BUILD_ID}" \
     --build-arg GIT_HASH="${GIT_HASH}" \
+    --secret id=gh_pat,env=GH_PAT \
     --no-cache \
     -t "${UNIQUE_TAG}" \
     -t "${LATEST_TAG}" \

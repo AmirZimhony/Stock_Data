@@ -1,9 +1,9 @@
 # Stock Data Scraper
 
-A Python application that scrapes stock data from Finviz and stores it in MongoDB with trend analysis.
+A Python application that scrapes stock data from a screener data source and stores it in MongoDB with trend analysis.
 
 
-This script fetches stock data from the Finviz website and stores it in MongoDB.
+This script fetches stock data from a configurable screener data source and stores it in MongoDB.
 
 Beginner's Instructions:
 1. Download and install Python from https://www.python.org/downloads/
@@ -17,7 +17,7 @@ Beginner's Instructions:
 
 ## Features
 
-- **Multi-threaded scraping** from Finviz screener
+- **Multi-threaded scraping** from a configurable screener data source
 - **MongoDB storage** with trend tracking (rising days, accumulated change)
 - **Container-optimized logging** (stdout + optional file logging)
 - **Configurable screener URL and proxy** via `nasdaq_scraping_url` and `proxy_url` (required)
@@ -98,8 +98,10 @@ The application includes Docker configuration for Linux AMD64:
 
 **Docker commands:**
 ```bash
-# Build image
-docker build -t stock-scraper .
+# Build image (GH_PAT is required to install the private stocker_metrics
+# package; it's passed as a BuildKit secret, never as a build-arg, so it
+# doesn't end up in the image history)
+DOCKER_BUILDKIT=1 docker build --secret id=gh_pat,env=GH_PAT -t stock-scraper .
 
 # Run container
 docker run -d --name stock-scraper \
@@ -125,7 +127,7 @@ Use `db_url` for Atlas. Omit `--env` to use `dev.json`. Use `--env <name>` plus 
 ├── config.py               # dev.json or CLI; Mongo URI from db_url env
 ├── stock_functions.py      # Core scraping and database functions
 ├── logging_config.py       # Simple logging configuration
-├── Data_extracter.py       # Alternative scraper implementation
+├── data_source_to_csv.py   # Alternative scraper implementation
 ├── requirements.txt        # Python dependencies
 └── tests/
     └── test_main.py        # Unit + live screener test; loads repo-root .env via dotenv
@@ -154,11 +156,21 @@ The application uses container-optimized logging:
 python -m pytest tests/
 ```
 
-`tests/test_main.py` calls `load_dotenv` on the repo-root `.env` at import time. `test_nasdaq_scraping_url_live_request` performs a real GET to `nasdaq_scraping_url` via `proxy_url` and asserts HTTP 200 and `screener_table` in the HTML; it raises if those env vars are missing. Network access required for that test.
+`tests/test_main.py` calls `load_dotenv` on the repo-root `.env` at import time. `test_live_scraper_parses_real_screener_page` performs a real GET to `nasdaq_scraping_url` via `proxy_url` and asserts a valid screener page was parsed; it raises if those env vars are missing. Network access required for that test — it's marked `@pytest.mark.network`, so you can skip it when offline with `pytest -m "not network"`. CI runs the full suite, including this test.
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
+- **lint** — `ruff check` / `ruff format --check`
+- **test** — full `pytest` suite (including the live data-source test, using `NASDAQ_SCRAPING_URL`/`PROXY_URL` repo secrets)
+- **secret-scan** — `gitleaks`
+- **docker-build** — multi-arch build, pushed to Docker Hub (`amiroz/projects:stock_data_latest`) only on push to `main`
+
+Requires these repo secrets: `GH_PAT` (installs the private `stocker_metrics` package), `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`, `NASDAQ_SCRAPING_URL`, `PROXY_URL`.
 
 ## Build an image and push to Docker Hub
 ```bash
-./docker-build.sh
+GH_PAT=<your_github_pat> ./docker-build.sh
 ```
 
 ### Logging Configuration
@@ -178,6 +190,8 @@ See [LOGGING_CONFIG.md](LOGGING_CONFIG.md) for detailed logging setup.
 - `python-dotenv` - Load `.env` for `db_url`, `nasdaq_scraping_url`, `proxy_url`
 - `pandas` - Data processing
 - `numpy` - Numerical operations
+- `pytest` - Test runner
+- `stocker_metrics` - Emits `stocks.read`/`stocks.inserted`/`stocks.updated` gauges per run over DogStatsD (`STATSD_HOST`/`STATSD_PORT`/`METRICS_PREFIX`/`METRICS_ENV`/`METRICS_ENABLED` env vars; sane defaults, fails silently if no exporter is running)
 
 ## License
 

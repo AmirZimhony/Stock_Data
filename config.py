@@ -25,7 +25,9 @@ def parse_args():
         help="If set, settings from CLI flags (not dev.json)",
     )
     p.add_argument("--db-name", dest="DB_name", default="stock_test")
-    p.add_argument("--collection-name", dest="collection_name", default="nasdaq_stocks_test")
+    p.add_argument(
+        "--collection-name", dest="collection_name", default="nasdaq_stocks_test"
+    )
     p.add_argument("--max-workers", dest="max_workers", type=int, default=5)
     p.add_argument("--end-index", dest="end_index", type=int, default=101)
     return p.parse_args()

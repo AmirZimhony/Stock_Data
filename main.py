@@ -1,10 +1,12 @@
 """
 Stock data scraper main application.
 
-This script fetches stock data from the Finviz website and stores it in MongoDB.
+This script fetches stock data from a configurable screener data source and stores it in MongoDB.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+
+import stocker_metrics
 
 import config
 from logging_config import get_logger
@@ -32,7 +34,13 @@ def main():
         )
 
     totals = get_aggregate_counts()
-    logger.info(f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}")
+    logger.info(
+        f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}"
+    )
+
+    stocker_metrics.gauge("stocks.read", totals["total_read"])
+    stocker_metrics.gauge("stocks.inserted", totals["inserted"])
+    stocker_metrics.gauge("stocks.updated", totals["updated"])
 
 
 if __name__ == "__main__":
