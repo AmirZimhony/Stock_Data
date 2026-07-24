@@ -10,7 +10,7 @@ import stocker_metrics
 
 import config
 from logging_config import get_logger
-from stock_functions import get_data, reset_aggregate_counts, get_aggregate_counts
+from stock_functions import get_aggregate_counts, get_data, reset_aggregate_counts
 
 args = config.parse_args()
 config.configure(args)

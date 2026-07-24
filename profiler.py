@@ -1,12 +1,13 @@
-import cProfile
-import pstats
-import psutil
-import sys
 import argparse
+import cProfile
 import logging
 import os
+import pstats
+import sys
 import time
 import tracemalloc
+
+import psutil
 
 # Configure logging for profiler
 logging.basicConfig(

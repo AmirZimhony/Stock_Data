@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -11,9 +10,9 @@ from pymongo import MongoClient
 _DIR = os.path.dirname(__file__)
 
 settings: dict = {}
-client: Optional[MongoClient] = None
+client: MongoClient | None = None
 collection = None
-active_env: Optional[str] = None
+active_env: str | None = None
 
 
 def parse_args():

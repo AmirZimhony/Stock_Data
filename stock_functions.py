@@ -3,11 +3,13 @@ Stock data processing functions for fetching and storing stock information.
 """
 
 import os
-import requests
-import time
-from bs4 import BeautifulSoup
 import threading
+import time
 from datetime import datetime, timezone
+
+import requests
+from bs4 import BeautifulSoup
+
 from logging_config import get_logger
 
 # Get logger for this module
