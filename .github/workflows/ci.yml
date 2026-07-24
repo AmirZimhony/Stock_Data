@@ -66,6 +66,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker-build:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: [lint, test, secret-scan]
     steps:
@@ -78,20 +79,55 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build (and push on main)
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: |
-            amiroz/projects:stock_data_latest
-            amiroz/projects:stock_data_${{ github.run_number }}_${{ github.sha }}
+          push: true
+          tags: amiroz/projects:stock_data_pr_${{ github.event.number }}
           secrets: |
             gh_pat=${{ secrets.GH_PAT }}
+
+  # Retag the PR image as latest after merge (no rebuild).
+  promote-latest:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [lint, test, secret-scan]
+    steps:
+      - name: Find merged PR number
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+            const merged = prs.data.find((p) => p.merged_at);
+            if (!merged) {
+              core.setFailed(`No merged PR found for commit ${context.sha}`);
+              return;
+            }
+            core.setOutput("number", merged.number);
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Retag PR image as latest
+        run: |
+          docker buildx imagetools create \
+            --tag amiroz/projects:stock_data_latest \
+            "amiroz/projects:stock_data_pr_${{ steps.pr.outputs.number }}"

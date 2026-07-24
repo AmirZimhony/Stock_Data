@@ -164,7 +164,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
 - **lint** — `ruff check` / `ruff format --check`
 - **test** — full `pytest` suite (including the live data-source test, using `NASDAQ_SCRAPING_URL`/`PROXY_URL` repo secrets)
 - **secret-scan** — `gitleaks`
-- **docker-build** — multi-arch build, pushed to Docker Hub (`amiroz/projects:stock_data_latest`) only on push to `main`
+- **docker-build** — on PRs only: pushes `amiroz/projects:stock_data_pr_<PR#>` for testing
+- **promote-latest** — on merge to `main`: retags that PR image to `amiroz/projects:stock_data_latest` (no rebuild)
 
 Requires these repo secrets: `GH_PAT` (installs the private `stocker_metrics` package), `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`, `NASDAQ_SCRAPING_URL`, `PROXY_URL`.
 
