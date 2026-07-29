@@ -1,11 +1,11 @@
+import importlib
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import importlib
-from datetime import datetime, timezone
-
+import pytest
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -57,10 +57,11 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
     import_main_with_mocks()
     import stock_functions as sf
 
-    # Header row includes a "Flag" column (as Finviz added) to verify it's
-    # ignored and the remaining fields still line up correctly by header name.
-    # The ticker cell mimics Finviz's real markup: a company-logo <img> whose
-    # accessibility text repeats the ticker, plus the visible tab-link anchor.
+    # Header row includes a "Flag" column (as the data source added) to verify
+    # it's ignored and the remaining fields still line up correctly by header
+    # name. The ticker cell mimics the data source's real markup: a
+    # company-logo <img> whose accessibility text repeats the ticker, plus the
+    # visible tab-link anchor.
     html = (
         "<table class='screener_table'>"
         "<tr valign='middle'>"
@@ -96,7 +97,10 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
 
     def fake_get(url, proxies=None, headers=None, timeout=None):
         assert url == expected_url
-        assert proxies == {"http": "http://proxy.example:80", "https": "http://proxy.example:80"}
+        assert proxies == {
+            "http": "http://proxy.example:80",
+            "https": "http://proxy.example:80",
+        }
         return FakeResponse(html, 200)
 
     called = {"data": None}
@@ -140,7 +144,9 @@ def test_get_data_skips_write_on_unexpected_page(monkeypatch):
             self.status_code = status_code
 
     def fake_get(url, proxies=None, headers=None, timeout=None):
-        return FakeResponse("<html><body>Access to this page has been denied</body></html>", 200)
+        return FakeResponse(
+            "<html><body>Access to this page has been denied</body></html>", 200
+        )
 
     invoked = {"called": False}
 
@@ -204,7 +210,9 @@ def test_get_data_retries_after_request_exception(monkeypatch):
     sf.get_data(1, None)
 
     assert calls["count"] == 3, "expected 2 failures then a successful 3rd attempt"
-    assert called["data"] is not None, "should have recovered and written data after retrying"
+    assert called["data"] is not None, (
+        "should have recovered and written data after retrying"
+    )
     assert called["data"][0]["ticker"] == "AAPL"
 
 
@@ -293,8 +301,9 @@ def test_write_or_update_to_mongo_updates_accumulated_and_rising(monkeypatch):
     assert before <= write_timestamp <= after
 
 
-def test_live_scraper_parses_real_finviz_page(monkeypatch):
-    """The only test in this suite that hits the real Finviz site (exactly one request).
+@pytest.mark.network
+def test_live_scraper_parses_real_screener_page(monkeypatch):
+    """The only test in this suite that hits the real data source (exactly one request).
 
     Exercises the actual get_data parser against live HTML to catch column/layout
     changes (e.g. a new column shifting indexes) that mocked tests can't detect.
@@ -317,13 +326,15 @@ def test_live_scraper_parses_real_finviz_page(monkeypatch):
     monkeypatch.setattr(sf, "write_or_update_to_mongo", fake_write)
     monkeypatch.setattr(sf.time, "sleep", lambda *_: None)
 
-    sf.get_data(1, None)  # exactly one real HTTP request to Finviz
+    sf.get_data(1, None)  # exactly one real HTTP request to the data source
 
     assert captured["data"], "expected at least one parsed stock row from the live page"
 
     tickers = [row["ticker"] for row in captured["data"]]
     assert all(tickers), "every row should have a non-empty ticker"
-    assert len(tickers) == len(set(tickers)), "scraper returned duplicate tickers on one page"
+    assert len(tickers) == len(set(tickers)), (
+        "scraper returned duplicate tickers on one page"
+    )
 
     first = captured["data"][0]
     assert first["serial_number"] == 1

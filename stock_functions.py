@@ -3,11 +3,13 @@ Stock data processing functions for fetching and storing stock information.
 """
 
 import os
-import requests
-import time
-from bs4 import BeautifulSoup
 import threading
+import time
 from datetime import datetime, timezone
+
+import requests
+from bs4 import BeautifulSoup
+
 from logging_config import get_logger
 
 # Get logger for this module
@@ -33,13 +35,14 @@ def get_aggregate_counts():
     with _aggregate_lock:
         return dict(_aggregate_counts)
 
+
 def write_or_update_to_mongo(page_data, collection):
     """
     Writes or updates stock information in MongoDB.
-    
+
     This function uses atomic operations with optimistic locking and price-based duplicate detection
     to prevent race conditions and ensure rising_days is calculated correctly.
-    
+
     Args:
         page_data (list): A list of dictionaries, each representing stock information.
         collection: MongoDB collection object for database operations.
@@ -48,23 +51,25 @@ def write_or_update_to_mongo(page_data, collection):
     updated_count = 0
     write_time = datetime.now(timezone.utc)
 
-    for data in page_data:   
+    for data in page_data:
         try:
             # Normalize ticker to uppercase for consistent matching (fixes case sensitivity issues)
             ticker = data["ticker"].upper().strip() if data.get("ticker") else None
             if not ticker:
-                logger.warning(f"Skipping record with missing or empty ticker: {data.get('serial_number', 'unknown')}")
+                logger.warning(
+                    f"Skipping record with missing or empty ticker: {data.get('serial_number', 'unknown')}"
+                )
                 continue
-            
+
             current_stock = collection.find_one({"ticker": ticker})
-            
+
             if current_stock is not None:
                 # Existing stock - check for duplicate and update with atomic operations
                 try:
                     # Get current price from database
                     current_price = current_stock.get("price")
                     new_price = data.get("price")
-                    
+
                     # DUPLICATE DETECTION: Check if price actually changed
                     # If prices are the same (or very close), this is a duplicate - skip incrementing rising_days
                     price_unchanged = False
@@ -78,52 +83,71 @@ def write_or_update_to_mongo(page_data, collection):
                         except (ValueError, TypeError):
                             # If price conversion fails, proceed with update
                             pass
-                    
+
                     if price_unchanged:
                         # Price hasn't changed - update other fields but DON'T increment rising_days
                         # This prevents duplicate processing from incrementing the counter multiple times
                         result = collection.update_one(
                             {"ticker": ticker},
-                            {"$set": {
-                                "serial_number": data["serial_number"],
-                                "ticker": ticker,
-                                "company": data["company"],
-                                "sector": data["sector"],
-                                "industry": data["industry"],
-                                "country": data["country"],
-                                "market_cap": data["market_cap"],
-                                "pe_ratio": data["pe_ratio"],
-                                "volume": data["volume"],
-                                "change": data["change"],
-                                "timestamp": write_time,
-                                # DON'T update price, numOfRisingDays, or accumulatedChange
-                            }}
+                            {
+                                "$set": {
+                                    "serial_number": data["serial_number"],
+                                    "ticker": ticker,
+                                    "company": data["company"],
+                                    "sector": data["sector"],
+                                    "industry": data["industry"],
+                                    "country": data["country"],
+                                    "market_cap": data["market_cap"],
+                                    "pe_ratio": data["pe_ratio"],
+                                    "volume": data["volume"],
+                                    "change": data["change"],
+                                    "timestamp": write_time,
+                                    # DON'T update price, numOfRisingDays, or accumulatedChange
+                                }
+                            },
                         )
                         if result.modified_count > 0:
                             updated_count += 1
                         continue
-                    
+
                     # Price changed - proceed with calculating new rising_days
                     # Get current state
                     current_rising_days_str = current_stock.get("numOfRisingDays", "-")
-                    current_rising_days = 0 if current_rising_days_str == "-" else int(current_rising_days_str)
-                    
+                    current_rising_days = (
+                        0
+                        if current_rising_days_str == "-"
+                        else int(current_rising_days_str)
+                    )
+
                     current_change_str = current_stock.get("accumulatedChange", "-")
-                    current_change = 0 if current_change_str == "-" else float(current_change_str)
-                    
-                    # Calculate actual price change percentage from stored prices (more reliable than Finviz change)
+                    current_change = (
+                        0 if current_change_str == "-" else float(current_change_str)
+                    )
+
+                    # Calculate actual price change percentage from stored prices (more reliable than the reported change)
                     try:
                         current_price_float = float(current_price)
                         new_price_float = float(new_price)
                         if current_price_float > 0:
-                            actual_price_change_pct = ((new_price_float - current_price_float) / current_price_float) * 100
+                            actual_price_change_pct = (
+                                (new_price_float - current_price_float)
+                                / current_price_float
+                            ) * 100
                         else:
-                            # Fallback to Finviz change if price is 0 or invalid
-                            actual_price_change_pct = 0 if data["change"] == "-" else float(data["change"].strip("%"))
+                            # Fallback to reported change if price is 0 or invalid
+                            actual_price_change_pct = (
+                                0
+                                if data["change"] == "-"
+                                else float(data["change"].strip("%"))
+                            )
                     except (ValueError, TypeError, ZeroDivisionError):
-                        # Fallback to Finviz change if price calculation fails
-                        actual_price_change_pct = 0 if data["change"] == "-" else float(data["change"].strip("%"))
-                    
+                        # Fallback to reported change if price calculation fails
+                        actual_price_change_pct = (
+                            0
+                            if data["change"] == "-"
+                            else float(data["change"].strip("%"))
+                        )
+
                     # Calculate new rising_days based on actual price change
                     if actual_price_change_pct > 0:
                         # Price increased
@@ -134,7 +158,9 @@ def write_or_update_to_mongo(page_data, collection):
                         else:
                             # Continue rising: increment
                             new_rising_days = current_rising_days + 1
-                            new_accumulated_change = current_change + actual_price_change_pct
+                            new_accumulated_change = (
+                                current_change + actual_price_change_pct
+                            )
                     elif actual_price_change_pct < 0:
                         # Price decreased
                         if current_rising_days > 0:
@@ -144,37 +170,41 @@ def write_or_update_to_mongo(page_data, collection):
                         else:
                             # Continue falling: decrement
                             new_rising_days = current_rising_days - 1
-                            new_accumulated_change = current_change + actual_price_change_pct
+                            new_accumulated_change = (
+                                current_change + actual_price_change_pct
+                            )
                     else:
                         # Price unchanged (shouldn't happen due to duplicate check above, but handle it)
                         new_rising_days = current_rising_days
                         new_accumulated_change = current_change
-                    
+
                     # ATOMIC UPDATE with optimistic locking: only update if rising_days hasn't changed
                     # This prevents race conditions when multiple threads process the same stock
                     result = collection.update_one(
                         {
                             "ticker": ticker,
-                            "numOfRisingDays": current_rising_days_str  # Only match if unchanged (optimistic lock)
+                            "numOfRisingDays": current_rising_days_str,  # Only match if unchanged (optimistic lock)
                         },
-                        {"$set": {
-                            "serial_number": data["serial_number"],
-                            "ticker": ticker,
-                            "company": data["company"],
-                            "sector": data["sector"],
-                            "industry": data["industry"],
-                            "country": data["country"],
-                            "market_cap": data["market_cap"],
-                            "pe_ratio": data["pe_ratio"],
-                            "price": data["price"],
-                            "change": data["change"],
-                            "volume": data["volume"],
-                            "numOfRisingDays": str(new_rising_days),
-                            "accumulatedChange": str(new_accumulated_change),
-                            "timestamp": write_time
-                        }}
+                        {
+                            "$set": {
+                                "serial_number": data["serial_number"],
+                                "ticker": ticker,
+                                "company": data["company"],
+                                "sector": data["sector"],
+                                "industry": data["industry"],
+                                "country": data["country"],
+                                "market_cap": data["market_cap"],
+                                "pe_ratio": data["pe_ratio"],
+                                "price": data["price"],
+                                "change": data["change"],
+                                "volume": data["volume"],
+                                "numOfRisingDays": str(new_rising_days),
+                                "accumulatedChange": str(new_accumulated_change),
+                                "timestamp": write_time,
+                            }
+                        },
                     )
-                    
+
                     if result.modified_count > 0:
                         updated_count += 1
                     elif result.matched_count > 0:
@@ -184,17 +214,24 @@ def write_or_update_to_mongo(page_data, collection):
                     else:
                         # Optimistic lock failed - rising_days changed between read and update (race condition)
                         # Another thread successfully updated it, so we skip this update
-                        logger.warning(f"Optimistic lock failed for ticker {ticker} - race condition detected, skipping update. This may indicate the stock needs manual review.")
-                        
+                        logger.warning(
+                            f"Optimistic lock failed for ticker {ticker} - race condition detected, skipping update. This may indicate the stock needs manual review."
+                        )
+
                 except Exception as e:
-                    logger.error(f"Error processing data for stock with ticker {ticker}: {e}", exc_info=True)
+                    logger.error(
+                        f"Error processing data for stock with ticker {ticker}: {e}",
+                        exc_info=True,
+                    )
                     continue
             else:
                 # New stock - initialize values based on change percentage
                 try:
                     # Get change percentage to determine initial rising/falling state
-                    new_change = 0 if data["change"] == "-" else float(data["change"].strip("%"))
-                    
+                    new_change = (
+                        0 if data["change"] == "-" else float(data["change"].strip("%"))
+                    )
+
                     if new_change > 0:
                         # Stock is rising on first day
                         initial_rising_days = 1
@@ -211,35 +248,42 @@ def write_or_update_to_mongo(page_data, collection):
                     # If change parsing fails, default to 0
                     initial_rising_days = 0
                     initial_accumulated_change = 0
-                
+
                 result = collection.update_one(
                     {"ticker": ticker},
-                    {"$set": {
-                        "serial_number": data["serial_number"],
-                        "ticker": ticker,
-                        "company": data["company"],
-                        "sector": data["sector"],
-                        "industry": data["industry"],
-                        "country": data["country"],
-                        "market_cap": data["market_cap"],
-                        "pe_ratio": data["pe_ratio"],
-                        "price": data["price"],
-                        "change": data["change"],
-                        "volume": data["volume"],
-                        "numOfRisingDays": str(initial_rising_days),
-                        "accumulatedChange": str(initial_accumulated_change),
-                        "timestamp": write_time
-                    }},
-                    upsert=True
+                    {
+                        "$set": {
+                            "serial_number": data["serial_number"],
+                            "ticker": ticker,
+                            "company": data["company"],
+                            "sector": data["sector"],
+                            "industry": data["industry"],
+                            "country": data["country"],
+                            "market_cap": data["market_cap"],
+                            "pe_ratio": data["pe_ratio"],
+                            "price": data["price"],
+                            "change": data["change"],
+                            "volume": data["volume"],
+                            "numOfRisingDays": str(initial_rising_days),
+                            "accumulatedChange": str(initial_accumulated_change),
+                            "timestamp": write_time,
+                        }
+                    },
+                    upsert=True,
                 )
                 if result.upserted_id is not None:
                     inserted_count += 1
                 else:
                     updated_count += result.modified_count
-                    
+
         except Exception as e:
-            ticker_str = ticker if 'ticker' in locals() else data.get('ticker', 'unknown')
-            logger.error(f"Error making request to MongoDB for stock with ticker {ticker_str}: {e}", exc_info=True)
+            ticker_str = (
+                ticker if "ticker" in locals() else data.get("ticker", "unknown")
+            )
+            logger.error(
+                f"Error making request to MongoDB for stock with ticker {ticker_str}: {e}",
+                exc_info=True,
+            )
             continue
 
     try:
@@ -254,10 +298,12 @@ def write_or_update_to_mongo(page_data, collection):
         _aggregate_counts["updated"] += updated_count
 
     # Per-page completion log without per-page totals
-    logger.info(f"Upsert {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}")
+    logger.info(
+        f"Upsert {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}"
+    )
 
 
-# Maps Finviz screener header text (lowercased) to our output field names.
+# Maps data-source screener header text (lowercased) to our output field names.
 # Any other header (e.g. a new "Flag" column) is looked up here, found missing,
 # and therefore ignored automatically - regardless of where it sits in the row.
 _SCREENER_COLUMNS = {
@@ -299,7 +345,7 @@ def _cell_text(td):
 
 def get_data(start, collection):
     """
-    Fetches stock data from the Finviz website and stores it in MongoDB.
+    Fetches stock data from the configured screener data source and stores it in MongoDB.
 
     Base URL from nasdaq_scraping_url; for start > 1 appends &R={start} (or ?R=).
     proxy_url required. Parses HTML and stores rows in MongoDB.
@@ -340,58 +386,72 @@ def get_data(start, collection):
             logger.warning(f"Error making request: {e}, retrying...")
             response = None
     else:
-        status = response.status_code if response is not None else "no response (connection/proxy error)"
+        status = (
+            response.status_code
+            if response is not None
+            else "no response (connection/proxy error)"
+        )
         logger.error(f"Error making request more than 5 times: {status}")
         return
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(response.text, "html.parser")
     page_data = []
     table = soup.select_one("table.screener_table")
     if table is None:
-        logger.error("Finviz screener table not found; unexpected page returned (blocked or layout changed?)")
+        logger.error(
+            "Data-source screener table not found; unexpected page returned (blocked or layout changed?)"
+        )
         return
 
     columns = _map_columns(table)
     missing = set(_SCREENER_COLUMNS.values()) - set(columns)
     if missing:
-        logger.error(f"Finviz screener columns changed; missing expected fields: {sorted(missing)}")
+        logger.error(
+            f"Data-source screener columns changed; missing expected fields: {sorted(missing)}"
+        )
         return
 
     rows = table.select("tr[valign='top']")
     if not rows:
-        logger.error("Finviz screener table has no data rows; unexpected page returned")
+        logger.error(
+            "Data-source screener table has no data rows; unexpected page returned"
+        )
         return
 
     for tr in rows:
         try:
-            tds = tr.find_all('td')
-            price_text = _cell_text(tds[columns['price']])
+            tds = tr.find_all("td")
+            price_text = _cell_text(tds[columns["price"]])
             json_data = {
-                'serial_number': int(_cell_text(tds[columns['serial_number']])),
-                'ticker': _cell_text(tds[columns['ticker']]),
-                'company': _cell_text(tds[columns['company']]),
-                'sector': _cell_text(tds[columns['sector']]),
-                'industry': _cell_text(tds[columns['industry']]),
-                'country': _cell_text(tds[columns['country']]),
-                'market_cap': _cell_text(tds[columns['market_cap']]),
-                'pe_ratio': _cell_text(tds[columns['pe_ratio']]),
-                'price': float(price_text) if price_text.replace('.', '', 1).isdigit() else None,
-                'change': _cell_text(tds[columns['change']]),
-                'volume': _cell_text(tds[columns['volume']])
+                "serial_number": int(_cell_text(tds[columns["serial_number"]])),
+                "ticker": _cell_text(tds[columns["ticker"]]),
+                "company": _cell_text(tds[columns["company"]]),
+                "sector": _cell_text(tds[columns["sector"]]),
+                "industry": _cell_text(tds[columns["industry"]]),
+                "country": _cell_text(tds[columns["country"]]),
+                "market_cap": _cell_text(tds[columns["market_cap"]]),
+                "pe_ratio": _cell_text(tds[columns["pe_ratio"]]),
+                "price": float(price_text)
+                if price_text.replace(".", "", 1).isdigit()
+                else None,
+                "change": _cell_text(tds[columns["change"]]),
+                "volume": _cell_text(tds[columns["volume"]]),
             }
             page_data.append(json_data)
         except Exception as e:
             logger.error(f"Error processing data row: {e}")
-    
+
     if page_data:
-        logger.info(f"Fetched {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}")
+        logger.info(
+            f"Fetched {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}"
+        )
         write_or_update_to_mongo(page_data, collection)
-        
+
         # Aggressive memory cleanup
         page_data.clear()
         soup.decompose()  # Destroy BeautifulSoup tree
         del soup, table, rows, page_data
-        
+
         # Force garbage collection
         import gc
-        gc.collect()
 
+        gc.collect()

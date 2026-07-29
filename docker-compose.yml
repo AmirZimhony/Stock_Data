@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   stock-scraper:
-    build: .
+    build:
+      context: .
+      secrets:
+        - gh_pat
     container_name: stock-data-scraper
     environment:
       - LOG_LEVEL=INFO
@@ -20,3 +23,7 @@ services:
 networks:
   stock-network:
     driver: bridge
+
+secrets:
+  gh_pat:
+    environment: GH_PAT
