@@ -317,6 +317,7 @@ _SCREENER_COLUMNS = {
     "p/e": "pe_ratio",
     "price": "price",
     "change": "change",
+    "change %": "change",
     "volume": "volume",
 }
 

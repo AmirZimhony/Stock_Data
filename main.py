@@ -37,6 +37,8 @@ def main():
     logger.info(
         f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}"
     )
+    if totals["total_read"] == 0:
+        raise RuntimeError("No stock data scraped")
 
     stocker_metrics.gauge("stocks.read", totals["total_read"])
     stocker_metrics.gauge("stocks.inserted", totals["inserted"])
