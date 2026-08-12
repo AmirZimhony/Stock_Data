@@ -4,4 +4,6 @@ beautifulsoup4
 pandas
 python-dotenv
 numpy
+pytest
+git+https://github.com/AmirZimhony/stocker_metrics.git
 

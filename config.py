@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -11,9 +10,9 @@ from pymongo import MongoClient
 _DIR = os.path.dirname(__file__)
 
 settings: dict = {}
-client: Optional[MongoClient] = None
+client: MongoClient | None = None
 collection = None
-active_env: Optional[str] = None
+active_env: str | None = None
 
 
 def parse_args():
@@ -25,7 +24,9 @@ def parse_args():
         help="If set, settings from CLI flags (not dev.json)",
     )
     p.add_argument("--db-name", dest="DB_name", default="stock_test")
-    p.add_argument("--collection-name", dest="collection_name", default="nasdaq_stocks_test")
+    p.add_argument(
+        "--collection-name", dest="collection_name", default="nasdaq_stocks_test"
+    )
     p.add_argument("--max-workers", dest="max_workers", type=int, default=5)
     p.add_argument("--end-index", dest="end_index", type=int, default=101)
     return p.parse_args()
