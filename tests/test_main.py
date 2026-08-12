@@ -1,11 +1,11 @@
+import importlib
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
-import importlib
-from datetime import datetime, timezone
-
+import pytest
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +53,29 @@ def import_main_with_mocks():
             return importlib.import_module("main")
 
 
+def test_main_fails_when_nothing_scraped(monkeypatch):
+    main_mod = import_main_with_mocks()
+    monkeypatch.setattr(main_mod, "get_data", lambda *_: None)
+    monkeypatch.setattr(
+        main_mod,
+        "get_aggregate_counts",
+        lambda: {"total_read": 0, "inserted": 0, "updated": 0},
+    )
+    with pytest.raises(RuntimeError, match="No stock data scraped"):
+        main_mod.main()
+
+
+def test_main_succeeds_when_data_scraped(monkeypatch):
+    main_mod = import_main_with_mocks()
+    monkeypatch.setattr(main_mod, "get_data", lambda *_: None)
+    monkeypatch.setattr(
+        main_mod,
+        "get_aggregate_counts",
+        lambda: {"total_read": 20, "inserted": 1, "updated": 19},
+    )
+    main_mod.main()
+
+
 def test_get_data_parses_and_invokes_write(monkeypatch):
     import_main_with_mocks()
     import stock_functions as sf
@@ -66,7 +89,7 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
         "<tr valign='middle'>"
         "<th>No.</th><th>Ticker</th><th>Company</th><th>Sector</th>"
         "<th>Industry</th><th>Country</th><th>Market Cap</th><th>P/E</th>"
-        "<th>Price</th><th>Change</th><th>Volume</th><th>Flag</th>"
+        "<th>Price</th><th>Change %</th><th>Volume</th><th>Flag</th>"
         "</tr>"
         "<tr valign='top'>"
         "<td>1</td>"

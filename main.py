@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 from logging_config import get_logger
-from stock_functions import get_data, reset_aggregate_counts, get_aggregate_counts
+from stock_functions import get_aggregate_counts, get_data, reset_aggregate_counts
 
 args = config.parse_args()
 config.configure(args)
@@ -32,7 +32,11 @@ def main():
         )
 
     totals = get_aggregate_counts()
-    logger.info(f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}")
+    logger.info(
+        f"Done. read={totals['total_read']}, inserted={totals['inserted']}, updated={totals['updated']}"
+    )
+    if totals["total_read"] == 0:
+        raise RuntimeError("No stock data scraped")
 
 
 if __name__ == "__main__":
