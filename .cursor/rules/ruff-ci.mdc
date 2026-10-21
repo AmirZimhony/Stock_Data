@@ -1,0 +1,22 @@
+---
+description: Run the same Ruff lint and format checks as GitHub CI before finishing Python work
+alwaysApply: true
+---
+
+# Ruff must match CI
+
+GitHub CI (`.github/workflows/ci.yml`, job `lint`) fails the PR on either of these, using `pyproject.toml` (`target-version = py311`, lint select `E4`, `E7`, `E9`, `F`):
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+```
+
+Before finishing any turn that creates, edits, or deletes a `.py` file:
+
+1. Use the repo `.venv`. If `ruff` is missing there, install it with `.venv/bin/pip install ruff`.
+2. Run both commands above. Do not narrow them with `--select`, a path, or a different ruff config.
+3. If format check fails, run `.venv/bin/ruff format .` and then both checks again.
+4. Fix every violation those commands report. Do not leave them for CI.
+5. Do not say the work is done until both commands exit 0. If they could not be run, say why.
+6. In the reply, name both commands and whether they passed.
