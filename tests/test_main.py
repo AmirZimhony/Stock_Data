@@ -156,6 +156,88 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
     assert stock["volume"] == "50,000,000"
 
 
+def test_get_data_parses_fv_table(monkeypatch):
+    import_main_with_mocks()
+    import stock_functions as sf
+
+    html = (
+        "<html><body>"
+        "<div class='fv-table_row' data-row-key='AAPL'>"
+        "<div class='fv-table_cell' data-column-id='row'>1</div>"
+        "<div class='fv-table_cell' data-column-id='ticker' data-ticker='AAPL'>"
+        "<a class='fv-table_link'>AAPLAAPL</a>"
+        "</div>"
+        "<div class='fv-table_cell' data-column-id='company'>Apple Inc.</div>"
+        "<div class='fv-table_cell' data-column-id='sector'>Technology</div>"
+        "<div class='fv-table_cell' data-column-id='industry'>Consumer Electronics</div>"
+        "<div class='fv-table_cell' data-column-id='country'>USA</div>"
+        "<div class='fv-table_cell' data-column-id='marketCap'>3.0T</div>"
+        "<div class='fv-table_cell' data-column-id='PE'>30.0</div>"
+        "<div class='fv-table_cell' data-column-id='price'>200.50</div>"
+        "<div class='fv-table_cell' data-column-id='change'>+1.23%</div>"
+        "<div class='fv-table_cell' data-column-id='volume'>50,000,000</div>"
+        "</div>"
+        "</body></html>"
+    )
+
+    class FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    called = {"data": None}
+
+    def fake_write(page_data, collection):
+        called["data"] = list(page_data)
+
+    monkeypatch.setattr(sf.requests, "get", lambda *a, **k: FakeResponse(html, 200))
+    monkeypatch.setattr(sf, "write_or_update_to_mongo", fake_write)
+    monkeypatch.setattr(sf.time, "sleep", lambda *_: None)
+    monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
+    monkeypatch.setenv("proxy_url", "http://proxy.example:80")
+
+    sf.get_data(1, None)
+
+    assert called["data"] is not None
+    stock = called["data"][0]
+    assert stock["serial_number"] == 1
+    assert stock["ticker"] == "AAPL"
+    assert stock["company"] == "Apple Inc."
+    assert stock["sector"] == "Technology"
+    assert stock["industry"] == "Consumer Electronics"
+    assert stock["country"] == "USA"
+    assert stock["market_cap"] == "3.0T"
+    assert stock["pe_ratio"] == "30.0"
+    assert stock["price"] == 200.50
+    assert stock["change"] == "+1.23%"
+    assert stock["volume"] == "50,000,000"
+
+
+def test_get_data_uses_lowercase_r_for_pagination(monkeypatch):
+    import_main_with_mocks()
+    import stock_functions as sf
+
+    seen = {"url": None}
+
+    class FakeResponse:
+        def __init__(self):
+            self.text = "<html><body>no table</body></html>"
+            self.status_code = 200
+
+    def fake_get(url, proxies=None, headers=None, timeout=None):
+        seen["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(sf.requests, "get", fake_get)
+    monkeypatch.setattr(sf.time, "sleep", lambda *_: None)
+    monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
+    monkeypatch.setenv("proxy_url", "http://proxy.example:80")
+
+    sf.get_data(21, None)
+
+    assert seen["url"] == "https://example.com/screener?v=111&r=21"
+
+
 def test_get_data_skips_write_on_unexpected_page(monkeypatch):
     """Simulates a blocked/changed response (no screener table) and expects a safe no-op."""
     import_main_with_mocks()

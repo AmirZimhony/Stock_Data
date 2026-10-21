@@ -321,6 +321,21 @@ _SCREENER_COLUMNS = {
     "volume": "volume",
 }
 
+# data-column-id on the current Finviz fv-table cells.
+_FV_COLUMNS = {
+    "row": "serial_number",
+    "ticker": "ticker",
+    "company": "company",
+    "sector": "sector",
+    "industry": "industry",
+    "country": "country",
+    "marketCap": "market_cap",
+    "PE": "pe_ratio",
+    "price": "price",
+    "change": "change",
+    "volume": "volume",
+}
+
 
 def _map_columns(table):
     """Map known field names to their td index using the table's header row."""
@@ -344,15 +359,112 @@ def _cell_text(td):
     return link.get_text(strip=True) if link else td.get_text(strip=True)
 
 
+def _stock_from_display_fields(fields):
+    """Build a stock dict from Finviz display strings (same shapes as before)."""
+    price_text = fields["price"]
+    return {
+        "serial_number": int(fields["serial_number"]),
+        "ticker": fields["ticker"],
+        "company": fields["company"],
+        "sector": fields["sector"],
+        "industry": fields["industry"],
+        "country": fields["country"],
+        "market_cap": fields["market_cap"],
+        "pe_ratio": fields["pe_ratio"],
+        "price": float(price_text) if price_text.replace(".", "", 1).isdigit() else None,
+        "change": fields["change"],
+        "volume": fields["volume"],
+    }
+
+
+def _fv_cell_text(cell, column_id):
+    if column_id == "ticker":
+        ticker = (cell.get("data-ticker") or "").strip()
+        if ticker:
+            return ticker
+    return cell.get_text(strip=True)
+
+
+def _rows_from_fv_table(soup):
+    """Parse current Finviz fv-table rows using visible cell text.
+
+    None means this page has no fv-table (try the legacy HTML table).
+    """
+    rows = soup.select(".fv-table_row")
+    if not rows:
+        return None
+
+    page_data = []
+    for row in rows:
+        try:
+            cells = {
+                cell.get("data-column-id"): cell
+                for cell in row.select(".fv-table_cell")
+                if cell.get("data-column-id")
+            }
+            missing = [name for col_id, name in _FV_COLUMNS.items() if col_id not in cells]
+            if missing:
+                logger.error(
+                    f"Finviz screener columns changed; missing expected fields: {sorted(missing)}"
+                )
+                return []
+            fields = {
+                name: _fv_cell_text(cells[col_id], col_id)
+                for col_id, name in _FV_COLUMNS.items()
+            }
+            page_data.append(_stock_from_display_fields(fields))
+        except Exception as e:
+            logger.error(f"Error processing data row: {e}")
+    if not page_data:
+        logger.error("Finviz screener table has no data rows; unexpected page returned")
+    return page_data
+
+
+def _rows_from_html_table(soup):
+    """Parse the legacy <table class='screener_table'> markup."""
+    table = soup.select_one("table.screener_table")
+    if table is None:
+        logger.error(
+            "Finviz screener table not found; unexpected page returned (blocked or layout changed?)"
+        )
+        return []
+
+    columns = _map_columns(table)
+    missing = set(_SCREENER_COLUMNS.values()) - set(columns)
+    if missing:
+        logger.error(
+            f"Finviz screener columns changed; missing expected fields: {sorted(missing)}"
+        )
+        return []
+
+    rows = table.select("tr[valign='top']")
+    if not rows:
+        logger.error("Finviz screener table has no data rows; unexpected page returned")
+        return []
+
+    page_data = []
+    for tr in rows:
+        try:
+            tds = tr.find_all("td")
+            fields = {
+                name: _cell_text(tds[columns[name]])
+                for name in columns
+            }
+            page_data.append(_stock_from_display_fields(fields))
+        except Exception as e:
+            logger.error(f"Error processing data row: {e}")
+    return page_data
+
+
 def get_data(start, collection):
     """
     Fetches stock data from the configured screener data source and stores it in MongoDB.
 
-    Base URL from nasdaq_scraping_url; for start > 1 appends &R={start} (or ?R=).
+    Base URL from nasdaq_scraping_url; for start > 1 appends &r={start} (or ?r=).
     proxy_url required. Parses HTML and stores rows in MongoDB.
 
     Args:
-        start (int): Pagination offset (1 = first page, no R parameter).
+        start (int): Pagination offset (1 = first page, no r parameter).
         collection: MongoDB collection object for database operations.
     """
     base = os.getenv("nasdaq_scraping_url")
@@ -367,7 +479,7 @@ def get_data(start, collection):
         url = base
     else:
         sep = "&" if "?" in base else "?"
-        url = f"{base}{sep}R={start}"
+        url = f"{base}{sep}r={start}"
 
     proxies = {"http": proxy_url, "https": proxy_url}
 
@@ -395,64 +507,17 @@ def get_data(start, collection):
         logger.error(f"Error making request more than 5 times: {status}")
         return
     soup = BeautifulSoup(response.text, "html.parser")
-    page_data = []
-    table = soup.select_one("table.screener_table")
-    if table is None:
-        logger.error(
-            "Data-source screener table not found; unexpected page returned (blocked or layout changed?)"
-        )
-        return
-
-    columns = _map_columns(table)
-    missing = set(_SCREENER_COLUMNS.values()) - set(columns)
-    if missing:
-        logger.error(
-            f"Data-source screener columns changed; missing expected fields: {sorted(missing)}"
-        )
-        return
-
-    rows = table.select("tr[valign='top']")
-    if not rows:
-        logger.error(
-            "Data-source screener table has no data rows; unexpected page returned"
-        )
-        return
-
-    for tr in rows:
-        try:
-            tds = tr.find_all("td")
-            price_text = _cell_text(tds[columns["price"]])
-            json_data = {
-                "serial_number": int(_cell_text(tds[columns["serial_number"]])),
-                "ticker": _cell_text(tds[columns["ticker"]]),
-                "company": _cell_text(tds[columns["company"]]),
-                "sector": _cell_text(tds[columns["sector"]]),
-                "industry": _cell_text(tds[columns["industry"]]),
-                "country": _cell_text(tds[columns["country"]]),
-                "market_cap": _cell_text(tds[columns["market_cap"]]),
-                "pe_ratio": _cell_text(tds[columns["pe_ratio"]]),
-                "price": float(price_text)
-                if price_text.replace(".", "", 1).isdigit()
-                else None,
-                "change": _cell_text(tds[columns["change"]]),
-                "volume": _cell_text(tds[columns["volume"]]),
-            }
-            page_data.append(json_data)
-        except Exception as e:
-            logger.error(f"Error processing data row: {e}")
+    page_data = _rows_from_fv_table(soup)
+    if page_data is None:
+        page_data = _rows_from_html_table(soup)
 
     if page_data:
         logger.info(
             f"Fetched {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}"
         )
         write_or_update_to_mongo(page_data, collection)
-
-        # Aggressive memory cleanup
         page_data.clear()
-        soup.decompose()  # Destroy BeautifulSoup tree
-        del soup, table, rows, page_data
-
-        # Force garbage collection
+        soup.decompose()
         import gc
 
         gc.collect()
