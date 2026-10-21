@@ -371,7 +371,9 @@ def _stock_from_display_fields(fields):
         "country": fields["country"],
         "market_cap": fields["market_cap"],
         "pe_ratio": fields["pe_ratio"],
-        "price": float(price_text) if price_text.replace(".", "", 1).isdigit() else None,
+        "price": float(price_text)
+        if price_text.replace(".", "", 1).isdigit()
+        else None,
         "change": fields["change"],
         "volume": fields["volume"],
     }
@@ -402,7 +404,9 @@ def _rows_from_fv_table(soup):
                 for cell in row.select(".fv-table_cell")
                 if cell.get("data-column-id")
             }
-            missing = [name for col_id, name in _FV_COLUMNS.items() if col_id not in cells]
+            missing = [
+                name for col_id, name in _FV_COLUMNS.items() if col_id not in cells
+            ]
             if missing:
                 logger.error(
                     f"Finviz screener columns changed; missing expected fields: {sorted(missing)}"
@@ -446,10 +450,7 @@ def _rows_from_html_table(soup):
     for tr in rows:
         try:
             tds = tr.find_all("td")
-            fields = {
-                name: _cell_text(tds[columns[name]])
-                for name in columns
-            }
+            fields = {name: _cell_text(tds[columns[name]]) for name in columns}
             page_data.append(_stock_from_display_fields(fields))
         except Exception as e:
             logger.error(f"Error processing data row: {e}")
