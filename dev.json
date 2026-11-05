@@ -1,6 +1,7 @@
 {
-  "DB_name": "stock_test",
-  "collection_name": "stocks_test",
-  "max_workers": 5,
-  "end_index": 501
+    "DB_name": "stock_test",
+    "collection_name": "stocks_test",
+    "max_workers": 5,
+    "mode": "daily",
+    "limit": 100
 }

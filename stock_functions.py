@@ -1,19 +1,18 @@
 """
-Stock data processing functions for fetching and storing stock information.
+MongoDB writes for NASDAQ stock documents.
 """
 
-import os
 import threading
-import time
 from datetime import datetime, timezone
-
-import requests
-from bs4 import BeautifulSoup
 
 from logging_config import get_logger
 
 # Get logger for this module
 logger = get_logger(__name__)
+
+# Slow-changing fields. The daily run sets them only when a ticker is first
+# inserted; the weekly run refreshes them with update_profiles.
+PROFILE_FIELDS = ("company", "sector", "industry", "country")
 
 # Thread-safe aggregate counters across the whole run
 _aggregate_lock = threading.Lock()
@@ -36,7 +35,7 @@ def get_aggregate_counts():
         return dict(_aggregate_counts)
 
 
-def write_or_update_to_mongo(page_data, collection):
+def write_or_update_to_mongo(page_data, collection, insert_only=()):
     """
     Writes or updates stock information in MongoDB.
 
@@ -46,6 +45,7 @@ def write_or_update_to_mongo(page_data, collection):
     Args:
         page_data (list): A list of dictionaries, each representing stock information.
         collection: MongoDB collection object for database operations.
+        insert_only: Profile fields written only when the ticker is new ($setOnInsert).
     """
     inserted_count = 0
     updated_count = 0
@@ -61,6 +61,11 @@ def write_or_update_to_mongo(page_data, collection):
                 )
                 continue
 
+            profile = {
+                field: data[field]
+                for field in PROFILE_FIELDS
+                if field not in insert_only
+            }
             current_stock = collection.find_one({"ticker": ticker})
 
             if current_stock is not None:
@@ -93,10 +98,7 @@ def write_or_update_to_mongo(page_data, collection):
                                 "$set": {
                                     "serial_number": data["serial_number"],
                                     "ticker": ticker,
-                                    "company": data["company"],
-                                    "sector": data["sector"],
-                                    "industry": data["industry"],
-                                    "country": data["country"],
+                                    **profile,
                                     "market_cap": data["market_cap"],
                                     "pe_ratio": data["pe_ratio"],
                                     "volume": data["volume"],
@@ -189,10 +191,7 @@ def write_or_update_to_mongo(page_data, collection):
                             "$set": {
                                 "serial_number": data["serial_number"],
                                 "ticker": ticker,
-                                "company": data["company"],
-                                "sector": data["sector"],
-                                "industry": data["industry"],
-                                "country": data["country"],
+                                **profile,
                                 "market_cap": data["market_cap"],
                                 "pe_ratio": data["pe_ratio"],
                                 "price": data["price"],
@@ -249,28 +248,26 @@ def write_or_update_to_mongo(page_data, collection):
                     initial_rising_days = 0
                     initial_accumulated_change = 0
 
-                result = collection.update_one(
-                    {"ticker": ticker},
-                    {
-                        "$set": {
-                            "serial_number": data["serial_number"],
-                            "ticker": ticker,
-                            "company": data["company"],
-                            "sector": data["sector"],
-                            "industry": data["industry"],
-                            "country": data["country"],
-                            "market_cap": data["market_cap"],
-                            "pe_ratio": data["pe_ratio"],
-                            "price": data["price"],
-                            "change": data["change"],
-                            "volume": data["volume"],
-                            "numOfRisingDays": str(initial_rising_days),
-                            "accumulatedChange": str(initial_accumulated_change),
-                            "timestamp": write_time,
-                        }
-                    },
-                    upsert=True,
-                )
+                update = {
+                    "$set": {
+                        "serial_number": data["serial_number"],
+                        "ticker": ticker,
+                        **profile,
+                        "market_cap": data["market_cap"],
+                        "pe_ratio": data["pe_ratio"],
+                        "price": data["price"],
+                        "change": data["change"],
+                        "volume": data["volume"],
+                        "numOfRisingDays": str(initial_rising_days),
+                        "accumulatedChange": str(initial_accumulated_change),
+                        "timestamp": write_time,
+                    }
+                }
+                if insert_only:
+                    update["$setOnInsert"] = {
+                        field: data[field] for field in insert_only
+                    }
+                result = collection.update_one({"ticker": ticker}, update, upsert=True)
                 if result.upserted_id is not None:
                     inserted_count += 1
                 else:
@@ -303,222 +300,25 @@ def write_or_update_to_mongo(page_data, collection):
     )
 
 
-# Maps data-source screener header text (lowercased) to our output field names.
-# Any other header (e.g. a new "Flag" column) is looked up here, found missing,
-# and therefore ignored automatically - regardless of where it sits in the row.
-_SCREENER_COLUMNS = {
-    "no.": "serial_number",
-    "ticker": "ticker",
-    "company": "company",
-    "sector": "sector",
-    "industry": "industry",
-    "country": "country",
-    "market cap": "market_cap",
-    "p/e": "pe_ratio",
-    "price": "price",
-    "change": "change",
-    "change %": "change",
-    "volume": "volume",
-}
+def update_profiles(profiles, collection):
+    """$set company, sector, industry, and country on existing documents.
 
-# data-column-id on the current Finviz fv-table cells.
-_FV_COLUMNS = {
-    "row": "serial_number",
-    "ticker": "ticker",
-    "company": "company",
-    "sector": "sector",
-    "industry": "industry",
-    "country": "country",
-    "marketCap": "market_cap",
-    "PE": "pe_ratio",
-    "price": "price",
-    "change": "change",
-    "volume": "volume",
-}
-
-
-def _map_columns(table):
-    """Map known field names to their td index using the table's header row."""
-    header_cells = table.find("tr").find_all(["th", "td"])
-    columns = {}
-    for i, cell in enumerate(header_cells):
-        field = _SCREENER_COLUMNS.get(cell.get_text(strip=True).lower())
-        if field:
-            columns[field] = i
-    return columns
-
-
-def _cell_text(td):
-    """Visible text for a screener cell.
-
-    The ticker cell embeds a company-logo image whose accessibility text
-    repeats the ticker (e.g. "A" + "A" -> "AA"); prefer the visible
-    tab-link anchor when present to avoid that duplication.
+    Missing values ("-", empty, None) are skipped so they never replace stored
+    data. Tickers without a document are not inserted. Returns modified count.
     """
-    link = td.find("a", class_="tab-link")
-    return link.get_text(strip=True) if link else td.get_text(strip=True)
-
-
-def _stock_from_display_fields(fields):
-    """Build a stock dict from Finviz display strings (same shapes as before)."""
-    price_text = fields["price"]
-    return {
-        "serial_number": int(fields["serial_number"]),
-        "ticker": fields["ticker"],
-        "company": fields["company"],
-        "sector": fields["sector"],
-        "industry": fields["industry"],
-        "country": fields["country"],
-        "market_cap": fields["market_cap"],
-        "pe_ratio": fields["pe_ratio"],
-        "price": float(price_text)
-        if price_text.replace(".", "", 1).isdigit()
-        else None,
-        "change": fields["change"],
-        "volume": fields["volume"],
-    }
-
-
-def _fv_cell_text(cell, column_id):
-    if column_id == "ticker":
-        ticker = (cell.get("data-ticker") or "").strip()
-        if ticker:
-            return ticker
-    return cell.get_text(strip=True)
-
-
-def _rows_from_fv_table(soup):
-    """Parse current Finviz fv-table rows using visible cell text.
-
-    None means this page has no fv-table (try the legacy HTML table).
-    """
-    rows = soup.select(".fv-table_row")
-    if not rows:
-        return None
-
-    page_data = []
-    for row in rows:
+    updated = 0
+    for ticker, profile in profiles.items():
+        fields = {
+            field: profile[field]
+            for field in PROFILE_FIELDS
+            if profile.get(field) not in (None, "", "-")
+        }
+        if not fields:
+            continue
         try:
-            cells = {
-                cell.get("data-column-id"): cell
-                for cell in row.select(".fv-table_cell")
-                if cell.get("data-column-id")
-            }
-            missing = [
-                name for col_id, name in _FV_COLUMNS.items() if col_id not in cells
-            ]
-            if missing:
-                logger.error(
-                    f"Finviz screener columns changed; missing expected fields: {sorted(missing)}"
-                )
-                return []
-            fields = {
-                name: _fv_cell_text(cells[col_id], col_id)
-                for col_id, name in _FV_COLUMNS.items()
-            }
-            page_data.append(_stock_from_display_fields(fields))
+            result = collection.update_one({"ticker": ticker}, {"$set": fields})
         except Exception as e:
-            logger.error(f"Error processing data row: {e}")
-    if not page_data:
-        logger.error("Finviz screener table has no data rows; unexpected page returned")
-    return page_data
-
-
-def _rows_from_html_table(soup):
-    """Parse the legacy <table class='screener_table'> markup."""
-    table = soup.select_one("table.screener_table")
-    if table is None:
-        logger.error(
-            "Finviz screener table not found; unexpected page returned (blocked or layout changed?)"
-        )
-        return []
-
-    columns = _map_columns(table)
-    missing = set(_SCREENER_COLUMNS.values()) - set(columns)
-    if missing:
-        logger.error(
-            f"Finviz screener columns changed; missing expected fields: {sorted(missing)}"
-        )
-        return []
-
-    rows = table.select("tr[valign='top']")
-    if not rows:
-        logger.error("Finviz screener table has no data rows; unexpected page returned")
-        return []
-
-    page_data = []
-    for tr in rows:
-        try:
-            tds = tr.find_all("td")
-            fields = {name: _cell_text(tds[columns[name]]) for name in columns}
-            page_data.append(_stock_from_display_fields(fields))
-        except Exception as e:
-            logger.error(f"Error processing data row: {e}")
-    return page_data
-
-
-def get_data(start, collection):
-    """
-    Fetches stock data from the configured screener data source and stores it in MongoDB.
-
-    Base URL from nasdaq_scraping_url; for start > 1 appends &r={start} (or ?r=).
-    proxy_url required. Parses HTML and stores rows in MongoDB.
-
-    Args:
-        start (int): Pagination offset (1 = first page, no r parameter).
-        collection: MongoDB collection object for database operations.
-    """
-    base = os.getenv("nasdaq_scraping_url")
-    if not base:
-        raise ValueError("nasdaq_scraping_url environment variable is required")
-
-    proxy_url = os.getenv("proxy_url")
-    if not proxy_url:
-        raise ValueError("proxy_url environment variable is required")
-
-    if start == 1:
-        url = base
-    else:
-        sep = "&" if "?" in base else "?"
-        url = f"{base}{sep}r={start}"
-
-    proxies = {"http": proxy_url, "https": proxy_url}
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    }
-    time.sleep(1)
-
-    response = None
-    for trial_count in range(6):
-        try:
-            response = requests.get(url, proxies=proxies, headers=headers, timeout=10)
-            if response.status_code == 200:
-                break
-            logger.warning(f"Error making request: {response.status_code}, retrying...")
-        except Exception as e:
-            logger.warning(f"Error making request: {e}, retrying...")
-            response = None
-    else:
-        status = (
-            response.status_code
-            if response is not None
-            else "no response (connection/proxy error)"
-        )
-        logger.error(f"Error making request more than 5 times: {status}")
-        return
-    soup = BeautifulSoup(response.text, "html.parser")
-    page_data = _rows_from_fv_table(soup)
-    if page_data is None:
-        page_data = _rows_from_html_table(soup)
-
-    if page_data:
-        logger.info(
-            f"Fetched {page_data[0]['serial_number']}-{page_data[-1]['serial_number']}"
-        )
-        write_or_update_to_mongo(page_data, collection)
-        page_data.clear()
-        soup.decompose()
-        import gc
-
-        gc.collect()
+            logger.error(f"Profile update failed for ticker {ticker}: {e}")
+            continue
+        updated += result.modified_count
+    return updated

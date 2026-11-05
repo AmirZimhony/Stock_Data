@@ -2,6 +2,7 @@ pymongo
 requests 
 beautifulsoup4
 pandas
+yfinance==1.8.0
 python-dotenv
 numpy
 pytest

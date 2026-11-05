@@ -49,8 +49,6 @@ jobs:
       - name: Run tests
         env:
           db_url: mongodb://localhost/test
-          nasdaq_scraping_url: ${{ secrets.NASDAQ_SCRAPING_URL }}
-          proxy_url: ${{ secrets.PROXY_URL }}
         run: pytest -v
 
   secret-scan:

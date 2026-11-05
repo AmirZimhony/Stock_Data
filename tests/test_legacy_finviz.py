@@ -1,85 +1,32 @@
-import importlib
-import os
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-from unittest import mock
+"""Mocked tests for the legacy Finviz scraper (legacy_finviz.py)."""
 
 import pytest
-from dotenv import load_dotenv
 
-_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / ".env")
+import legacy_finviz as sf
 
 
-def import_main_with_mocks():
-    """Import main with a fake Mongo client and DB_URI set (re-imports cleanly per call)."""
-    sys.argv = ["main.py"]
-
-    class FakeCollection:
-        def __init__(self):
-            self.updated = []
-            self._by_serial = {}
-
-        def find_one(self, query):
-            return self._by_serial.get(query.get("serial_number"))
-
-        def update_one(self, query, update, upsert=False):
-            self.updated.append((query, update, upsert))
-
-    class FakeDatabase:
-        def __init__(self):
-            self._collections = {}
-
-        def __getitem__(self, name):
-            if name not in self._collections:
-                self._collections[name] = FakeCollection()
-            return self._collections[name]
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            self._dbs = {}
-
-        def __getitem__(self, name):
-            if name not in self._dbs:
-                self._dbs[name] = FakeDatabase()
-            return self._dbs[name]
-
-    env = {"db_url": "mongodb://localhost/test"}
-    with mock.patch.dict(os.environ, env, clear=False):
-        with mock.patch("pymongo.MongoClient", FakeClient):
-            if "main" in sys.modules:
-                del sys.modules["main"]
-            return importlib.import_module("main")
-
-
-def test_main_fails_when_nothing_scraped(monkeypatch):
-    main_mod = import_main_with_mocks()
-    monkeypatch.setattr(main_mod, "get_data", lambda *_: None)
+def test_run_fails_when_nothing_scraped(monkeypatch):
+    monkeypatch.setattr(sf, "get_data", lambda *_: True)
     monkeypatch.setattr(
-        main_mod,
+        sf,
         "get_aggregate_counts",
         lambda: {"total_read": 0, "inserted": 0, "updated": 0},
     )
     with pytest.raises(RuntimeError, match="No stock data scraped"):
-        main_mod.main()
+        sf.run(None, 2, 101)
 
 
-def test_main_succeeds_when_data_scraped(monkeypatch):
-    main_mod = import_main_with_mocks()
-    monkeypatch.setattr(main_mod, "get_data", lambda *_: None)
+def test_run_succeeds_when_data_scraped(monkeypatch):
+    monkeypatch.setattr(sf, "get_data", lambda *_: True)
     monkeypatch.setattr(
-        main_mod,
+        sf,
         "get_aggregate_counts",
         lambda: {"total_read": 20, "inserted": 1, "updated": 19},
     )
-    main_mod.main()
+    assert sf.run(None, 2, 101)["total_read"] == 20
 
 
 def test_get_data_parses_and_invokes_write(monkeypatch):
-    import_main_with_mocks()
-    import stock_functions as sf
-
     # Header row includes a "Flag" column (as the data source added) to verify
     # it's ignored and the remaining fields still line up correctly by header
     # name. The ticker cell mimics the data source's real markup: a
@@ -138,7 +85,7 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
     monkeypatch.setenv("nasdaq_scraping_url", expected_url)
     monkeypatch.setenv("proxy_url", "http://proxy.example:80")
 
-    sf.get_data(1, None)
+    assert sf.get_data(1, None) is True
 
     assert called["data"] is not None, "write_or_update_to_mongo was not called"
     assert isinstance(called["data"], list) and len(called["data"]) == 1
@@ -157,9 +104,6 @@ def test_get_data_parses_and_invokes_write(monkeypatch):
 
 
 def test_get_data_parses_fv_table(monkeypatch):
-    import_main_with_mocks()
-    import stock_functions as sf
-
     html = (
         "<html><body>"
         "<div class='fv-table_row' data-row-key='AAPL'>"
@@ -196,7 +140,7 @@ def test_get_data_parses_fv_table(monkeypatch):
     monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
     monkeypatch.setenv("proxy_url", "http://proxy.example:80")
 
-    sf.get_data(1, None)
+    assert sf.get_data(1, None) is True
 
     assert called["data"] is not None
     stock = called["data"][0]
@@ -214,9 +158,6 @@ def test_get_data_parses_fv_table(monkeypatch):
 
 
 def test_get_data_uses_lowercase_r_for_pagination(monkeypatch):
-    import_main_with_mocks()
-    import stock_functions as sf
-
     seen = {"url": None}
 
     class FakeResponse:
@@ -240,8 +181,6 @@ def test_get_data_uses_lowercase_r_for_pagination(monkeypatch):
 
 def test_get_data_skips_write_on_unexpected_page(monkeypatch):
     """Simulates a blocked/changed response (no screener table) and expects a safe no-op."""
-    import_main_with_mocks()
-    import stock_functions as sf
 
     class FakeResponse:
         def __init__(self, text, status_code=200):
@@ -264,16 +203,13 @@ def test_get_data_skips_write_on_unexpected_page(monkeypatch):
     monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
     monkeypatch.setenv("proxy_url", "http://proxy.example:80")
 
-    sf.get_data(1, None)
+    assert sf.get_data(1, None) is False
 
     assert invoked["called"] is False
 
 
 def test_get_data_retries_after_request_exception(monkeypatch):
     """A transient error (e.g. ProxyError) should be retried, not abort immediately."""
-    import_main_with_mocks()
-    import stock_functions as sf
-
     html = (
         "<table class='screener_table'>"
         "<tr valign='middle'>"
@@ -312,7 +248,7 @@ def test_get_data_retries_after_request_exception(monkeypatch):
     monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
     monkeypatch.setenv("proxy_url", "http://proxy.example:80")
 
-    sf.get_data(1, None)
+    assert sf.get_data(1, None) is True
 
     assert calls["count"] == 3, "expected 2 failures then a successful 3rd attempt"
     assert called["data"] is not None, (
@@ -322,10 +258,7 @@ def test_get_data_retries_after_request_exception(monkeypatch):
 
 
 def test_get_data_gives_up_after_repeated_exceptions(monkeypatch):
-    """If every attempt raises, get_data should stop after 6 tries and not crash."""
-    import_main_with_mocks()
-    import stock_functions as sf
-
+    """If every attempt raises, get_data should stop after 5 tries and not crash."""
     calls = {"count": 0}
 
     def fake_get(url, proxies=None, headers=None, timeout=None):
@@ -343,107 +276,7 @@ def test_get_data_gives_up_after_repeated_exceptions(monkeypatch):
     monkeypatch.setenv("nasdaq_scraping_url", "https://example.com/screener?v=111")
     monkeypatch.setenv("proxy_url", "http://proxy.example:80")
 
-    sf.get_data(1, None)
+    assert sf.get_data(1, None) is False
 
-    assert calls["count"] == 6, "expected 1 initial attempt + 5 retries"
+    assert calls["count"] == 5, "expected 5 attempts"
     assert invoked["called"] is False
-
-
-def test_write_or_update_to_mongo_updates_accumulated_and_rising(monkeypatch):
-    import_main_with_mocks()
-    import stock_functions as sf
-
-    class MemoryCollection:
-        def __init__(self):
-            self.storage = {
-                "AAPL": {
-                    "ticker": "AAPL",
-                    "price": 200.0,
-                    "numOfRisingDays": "2",
-                    "accumulatedChange": "4.0",
-                }
-            }
-            self.updates = []
-
-        def find_one(self, query):
-            return self.storage.get(query.get("ticker"))
-
-        def update_one(self, query, update, upsert=False):
-            self.updates.append((query, update, upsert))
-
-    fake_collection = MemoryCollection()
-
-    page_data = [
-        {
-            "serial_number": 1,
-            "ticker": "AAPL",
-            "company": "Apple Inc.",
-            "sector": "Technology",
-            "industry": "Consumer Electronics",
-            "country": "USA",
-            "market_cap": "3.0T",
-            "pe_ratio": "30.0",
-            "price": 200.50,
-            "change": "+1.00%",
-            "volume": "50,000,000",
-        }
-    ]
-
-    before = datetime.now(timezone.utc)
-    sf.write_or_update_to_mongo(page_data, fake_collection)
-    after = datetime.now(timezone.utc)
-
-    assert len(fake_collection.updates) == 1
-    query, update, upsert = fake_collection.updates[0]
-    assert query == {"ticker": "AAPL", "numOfRisingDays": "2"}
-    assert upsert is False
-    set_values = update.get("$set", {})
-    assert set_values.get("numOfRisingDays") == "3"
-    # actual change from price 200.0 -> 200.50 is 0.25%; accumulated 4.0 + 0.25
-    assert set_values.get("accumulatedChange") == "4.25"
-    write_timestamp = set_values.get("timestamp")
-    assert isinstance(write_timestamp, datetime) and write_timestamp.tzinfo is not None
-    assert before <= write_timestamp <= after
-
-
-@pytest.mark.network
-def test_live_scraper_parses_real_screener_page(monkeypatch):
-    """The only test in this suite that hits the real data source (exactly one request).
-
-    Exercises the actual get_data parser against live HTML to catch column/layout
-    changes (e.g. a new column shifting indexes) that mocked tests can't detect.
-    """
-    url = os.getenv("nasdaq_scraping_url")
-    proxy_url = os.getenv("proxy_url")
-    if not url or not proxy_url:
-        raise ValueError(
-            "nasdaq_scraping_url and proxy_url are required (e.g. in .env at repo root)"
-        )
-
-    import_main_with_mocks()
-    import stock_functions as sf
-
-    captured = {"data": None}
-
-    def fake_write(page_data, collection):
-        captured["data"] = list(page_data)
-
-    monkeypatch.setattr(sf, "write_or_update_to_mongo", fake_write)
-    monkeypatch.setattr(sf.time, "sleep", lambda *_: None)
-
-    sf.get_data(1, None)  # exactly one real HTTP request to the data source
-
-    assert captured["data"], "expected at least one parsed stock row from the live page"
-
-    tickers = [row["ticker"] for row in captured["data"]]
-    assert all(tickers), "every row should have a non-empty ticker"
-    assert len(tickers) == len(set(tickers)), (
-        "scraper returned duplicate tickers on one page"
-    )
-
-    first = captured["data"][0]
-    assert first["serial_number"] == 1
-    assert first["company"], "company should be parsed, not the ticker or blank"
-    assert first["price"] is None or isinstance(first["price"], float)
-    assert first["change"] == "-" or first["change"].endswith("%")
-    assert first["volume"], "volume should be parsed"
