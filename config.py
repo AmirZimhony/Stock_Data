@@ -1,4 +1,7 @@
-"""No --env: dev.json. With --env: settings from CLI. DB_URI from environment."""
+"""No --env: dev.json. With --env: settings from CLI. DB_URI from environment.
+
+--mode and --limit apply in both cases (CLI overrides dev.json).
+"""
 
 import argparse
 import json
@@ -8,6 +11,7 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 
 _DIR = os.path.dirname(__file__)
+MODES = ("daily", "weekly")
 
 settings: dict = {}
 client: MongoClient | None = None
@@ -15,7 +19,7 @@ collection = None
 active_env: str | None = None
 
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument(
         "--env",
@@ -27,9 +31,26 @@ def parse_args():
     p.add_argument(
         "--collection-name", dest="collection_name", default="nasdaq_stocks_test"
     )
-    p.add_argument("--max-workers", dest="max_workers", type=int, default=5)
-    p.add_argument("--end-index", dest="end_index", type=int, default=101)
-    return p.parse_args()
+    p.add_argument(
+        "--max-workers",
+        dest="max_workers",
+        type=int,
+        default=5,
+        help="Parallel MongoDB writers in daily mode",
+    )
+    p.add_argument(
+        "--mode",
+        choices=MODES,
+        default=None,
+        help="daily: price fields; weekly: company, sector, industry, country",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only the first N tickers of the universe (staging checks)",
+    )
+    return p.parse_args(argv)
 
 
 def configure(args) -> None:
@@ -47,12 +68,18 @@ def configure(args) -> None:
             ("DB_name", args.DB_name, "--db-name"),
             ("collection_name", args.collection_name, "--collection-name"),
             ("max_workers", args.max_workers, "--max-workers"),
-            ("end_index", args.end_index, "--end-index"),
         ]
         missing = [flag for _, val, flag in pairs if val is None]
         if missing:
             raise ValueError("With --env, required: " + ", ".join(missing))
         config = {key: val for key, val, _ in pairs}
+
+    config["mode"] = args.mode or config.get("mode", "daily")
+    if args.limit is not None:
+        config["limit"] = args.limit
+    config.setdefault("limit", None)
+    if config["limit"] is not None and config["limit"] < 1:
+        raise ValueError("--limit must be >= 1")
 
     DB_URI = os.getenv("db_url")
     if not DB_URI:

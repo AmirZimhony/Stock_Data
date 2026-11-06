@@ -33,4 +33,4 @@ ENV APP_NAME=stock_data_app
 ENV PYTHONUNBUFFERED=1
 
 # Uses dev.json from the image. Override `command` in compose for prod + CLI flags.
-CMD ["sh", "python", "main.py"]
+CMD ["python", "main.py"]
