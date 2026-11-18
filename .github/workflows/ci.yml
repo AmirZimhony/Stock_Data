@@ -40,9 +40,6 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Configure git credentials for private packages
-        run: git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
@@ -89,8 +86,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: amiroz/projects:stock_data_pr_${{ github.event.number }}
-          secrets: |
-            gh_pat=${{ secrets.GH_PAT }}
 
   # Retag the PR image as latest after merge (no rebuild).
   promote-latest:

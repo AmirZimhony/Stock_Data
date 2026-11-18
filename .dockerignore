@@ -44,7 +44,12 @@ Untitled-*.py
 High level plan.xlsx
 
 # Virtual environments
+.venv/
 path/
+
+# Scratch dumps
+*.csv
+*.xlsx
 
 # Secrets (provide at runtime via env / compose)
 .env
