@@ -12,7 +12,7 @@ services:
       - db_url=${db_url}
     volumes:
       - ./logs:/app/logs
-    restart: unless-stopped
+    restart: "no"
     networks:
       - stock-network
 

@@ -4,6 +4,7 @@ MongoDB writes for NASDAQ stock documents.
 
 import threading
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from logging_config import get_logger
 
@@ -13,6 +14,21 @@ logger = get_logger(__name__)
 # Slow-changing fields. The daily run sets them only when a ticker is first
 # inserted; the weekly run refreshes them with update_profiles.
 PROFILE_FIELDS = ("company", "sector", "industry", "country")
+MARKET_TZ = ZoneInfo("America/New_York")
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+
+def _market_date(value):
+    """Calendar date in America/New_York. Naive datetimes are treated as UTC."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(MARKET_TZ).date()
+
 
 # Thread-safe aggregate counters across the whole run
 _aggregate_lock = threading.Lock()
@@ -39,8 +55,10 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
     """
     Writes or updates stock information in MongoDB.
 
-    This function uses atomic operations with optimistic locking and price-based duplicate detection
-    to prevent race conditions and ensure rising_days is calculated correctly.
+    This function uses atomic operations with optimistic locking. A document whose
+    timestamp is already today's America/New_York date has already run: quote
+    fields are refreshed and the rising-day streak is left as stored. An earlier
+    date is a new day, including when the price moved less than one cent.
 
     Args:
         page_data (list): A list of dictionaries, each representing stock information.
@@ -49,7 +67,7 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
     """
     inserted_count = 0
     updated_count = 0
-    write_time = datetime.now(timezone.utc)
+    write_time = _utcnow()
 
     for data in page_data:
         try:
@@ -69,29 +87,11 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
             current_stock = collection.find_one({"ticker": ticker})
 
             if current_stock is not None:
-                # Existing stock - check for duplicate and update with atomic operations
+                # Existing stock - a same-day write refreshes the quote without touching the streak
                 try:
-                    # Get current price from database
-                    current_price = current_stock.get("price")
-                    new_price = data.get("price")
-
-                    # DUPLICATE DETECTION: Check if price actually changed
-                    # If prices are the same (or very close), this is a duplicate - skip incrementing rising_days
-                    price_unchanged = False
-                    if current_price is not None and new_price is not None:
-                        try:
-                            current_price_float = float(current_price)
-                            new_price_float = float(new_price)
-                            # If prices are within 1 cent, consider them the same (handles rounding)
-                            if abs(current_price_float - new_price_float) < 0.01:
-                                price_unchanged = True
-                        except (ValueError, TypeError):
-                            # If price conversion fails, proceed with update
-                            pass
-
-                    if price_unchanged:
-                        # Price hasn't changed - update other fields but DON'T increment rising_days
-                        # This prevents duplicate processing from incrementing the counter multiple times
+                    if _market_date(current_stock.get("timestamp")) == _market_date(
+                        write_time
+                    ):
                         result = collection.update_one(
                             {"ticker": ticker},
                             {
@@ -101,10 +101,10 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                                     **profile,
                                     "market_cap": data["market_cap"],
                                     "pe_ratio": data["pe_ratio"],
+                                    "price": data["price"],
                                     "volume": data["volume"],
                                     "change": data["change"],
                                     "timestamp": write_time,
-                                    # DON'T update price, numOfRisingDays, or accumulatedChange
                                 }
                             },
                         )
@@ -112,7 +112,9 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                             updated_count += 1
                         continue
 
-                    # Price changed - proceed with calculating new rising_days
+                    # New market day, including a move of less than one cent
+                    current_price = current_stock.get("price")
+                    new_price = data.get("price")
                     # Get current state
                     current_rising_days_str = current_stock.get("numOfRisingDays", "-")
                     current_rising_days = (
@@ -176,7 +178,7 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                                 current_change + actual_price_change_pct
                             )
                     else:
-                        # Price unchanged (shouldn't happen due to duplicate check above, but handle it)
+                        # Flat day: record today and keep the current streak
                         new_rising_days = current_rising_days
                         new_accumulated_change = current_change
 
