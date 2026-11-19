@@ -55,10 +55,11 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
     """
     Writes or updates stock information in MongoDB.
 
-    This function uses atomic operations with optimistic locking. A document whose
-    timestamp is already today's America/New_York date has already run: quote
-    fields are refreshed and the rising-day streak is left as stored. An earlier
-    date is a new day, including when the price moved less than one cent.
+    Chunking gives each ticker to one thread, so each update matches on ticker
+    only. A document whose timestamp is already today's America/New_York date
+    has already run: quote fields are refreshed and the rising-day streak is
+    left as stored. An earlier date is a new day, including when the price
+    moved less than one cent.
 
     Args:
         page_data (list): A list of dictionaries, each representing stock information.
@@ -182,13 +183,8 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                         new_rising_days = current_rising_days
                         new_accumulated_change = current_change
 
-                    # ATOMIC UPDATE with optimistic locking: only update if rising_days hasn't changed
-                    # This prevents race conditions when multiple threads process the same stock
                     result = collection.update_one(
-                        {
-                            "ticker": ticker,
-                            "numOfRisingDays": current_rising_days_str,  # Only match if unchanged (optimistic lock)
-                        },
+                        {"ticker": ticker},
                         {
                             "$set": {
                                 "serial_number": data["serial_number"],
@@ -206,18 +202,8 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                         },
                     )
 
-                    if result.modified_count > 0:
+                    if result.modified_count > 0 or result.matched_count > 0:
                         updated_count += 1
-                    elif result.matched_count > 0:
-                        # Matched but not modified - likely all fields were already set to these values
-                        # This is fine, count as successful update (no-op)
-                        updated_count += 1
-                    else:
-                        # Optimistic lock failed - rising_days changed between read and update (race condition)
-                        # Another thread successfully updated it, so we skip this update
-                        logger.warning(
-                            f"Optimistic lock failed for ticker {ticker} - race condition detected, skipping update. This may indicate the stock needs manual review."
-                        )
 
                 except Exception as e:
                     logger.error(

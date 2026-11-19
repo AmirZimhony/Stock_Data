@@ -457,6 +457,25 @@ def test_prior_day_same_price_records_the_new_day(monkeypatch):
     assert stored["price"] == 349.51
 
 
+def test_new_day_update_matches_ticker_only(monkeypatch):
+    yesterday = datetime(2026, 11, 16, 21, 0, tzinfo=timezone.utc)
+    today = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
+    _freeze_now(monkeypatch, today)
+    queries = []
+
+    class RecordingCollection(MemoryCollection):
+        def update_one(self, query, update, upsert=False):
+            queries.append(dict(query))
+            return super().update_one(query, update, upsert=upsert)
+
+    collection = RecordingCollection([_stored_quote("AAPL", 100.0, "2", yesterday)])
+    document = ys.build_document(1, "AAPL", quote("AAPL", regularMarketPrice=110.0))
+    sf.write_or_update_to_mongo([document], collection)
+
+    assert queries == [{"ticker": "AAPL"}]
+    assert collection.docs["AAPL"]["numOfRisingDays"] == "3"
+
+
 def test_same_day_price_move_does_not_increment_rising_days(monkeypatch):
     today = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
     _freeze_now(monkeypatch, today)
