@@ -3,7 +3,7 @@
 import importlib
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -423,6 +423,69 @@ def test_daily_insert_sets_profile_fields_on_insert_only():
     assert microsoft["sector"] == microsoft["industry"] == microsoft["country"] == "-"
     assert microsoft["numOfRisingDays"] == "1"
     assert sf.get_aggregate_counts() == {"total_read": 2, "inserted": 1, "updated": 1}
+
+
+def _freeze_now(monkeypatch, moment):
+    monkeypatch.setattr(sf, "_utcnow", lambda: moment)
+
+
+def _stored_quote(ticker, price, rising_days, timestamp):
+    document = ys.build_document(1, ticker, quote(ticker, regularMarketPrice=price))
+    document.update(
+        {
+            "numOfRisingDays": rising_days,
+            "accumulatedChange": "4.0",
+            "timestamp": timestamp,
+            "price": price,
+        }
+    )
+    return document
+
+
+def test_prior_day_same_price_records_the_new_day(monkeypatch):
+    yesterday = datetime(2026, 11, 16, 21, 0, tzinfo=timezone.utc)
+    today = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
+    _freeze_now(monkeypatch, today)
+    collection = MemoryCollection([_stored_quote("AAPL", 349.51, "3", yesterday)])
+    document = ys.build_document(1, "AAPL", quote("AAPL"))
+    sf.write_or_update_to_mongo([document], collection)
+    sf.write_or_update_to_mongo([document], collection)
+    stored = collection.docs["AAPL"]
+    assert stored["numOfRisingDays"] == "3"
+    assert stored["accumulatedChange"] == "4.0"
+    assert stored["timestamp"] == today
+    assert stored["price"] == 349.51
+
+
+def test_new_day_update_matches_ticker_only(monkeypatch):
+    yesterday = datetime(2026, 11, 16, 21, 0, tzinfo=timezone.utc)
+    today = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
+    _freeze_now(monkeypatch, today)
+    queries = []
+
+    class RecordingCollection(MemoryCollection):
+        def update_one(self, query, update, upsert=False):
+            queries.append(dict(query))
+            return super().update_one(query, update, upsert=upsert)
+
+    collection = RecordingCollection([_stored_quote("AAPL", 100.0, "2", yesterday)])
+    document = ys.build_document(1, "AAPL", quote("AAPL", regularMarketPrice=110.0))
+    sf.write_or_update_to_mongo([document], collection)
+
+    assert queries == [{"ticker": "AAPL"}]
+    assert collection.docs["AAPL"]["numOfRisingDays"] == "3"
+
+
+def test_same_day_price_move_does_not_increment_rising_days(monkeypatch):
+    today = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
+    _freeze_now(monkeypatch, today)
+    collection = MemoryCollection([_stored_quote("AAPL", 100.0, "2", today)])
+    document = ys.build_document(1, "AAPL", quote("AAPL", regularMarketPrice=101.5))
+    sf.write_or_update_to_mongo([document], collection)
+    stored = collection.docs["AAPL"]
+    assert stored["numOfRisingDays"] == "2"
+    assert stored["accumulatedChange"] == "4.0"
+    assert stored["price"] == 101.5
 
 
 def test_same_price_rerun_does_not_increment_rising_days():

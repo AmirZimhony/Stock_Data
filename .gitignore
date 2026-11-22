@@ -1,14 +1,28 @@
 .env
 /venv/
+.venv/
 ENV/
 env.bak/
 venv.bak/
-/__pycache__/*
+
+# Python
+__pycache__/
+*.py[cod]
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# OS
+.DS_Store
+
+# Logs
+*.log
 stock_scraper.log*
-tests/__pycache__/*
+
+# Scratch dumps
+*.xlsx
+yfinance_*.csv
+legacy_finviz.py

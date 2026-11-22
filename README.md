@@ -94,12 +94,12 @@ Missing text and numeric strings are `-`; a missing price is `None`. Documents a
 ## Docker
 
 ```bash
-DOCKER_BUILDKIT=1 docker build --secret id=gh_pat,env=GH_PAT -t stock-scraper .
+docker build -t stock-scraper .
 docker run --rm -e db_url="your_mongodb_connection_string" stock-scraper \
   python -u main.py --env staging --db-name stock_staging --collection-name nasdaq_stocks_staging --max-workers 5 --mode daily --limit 500
 ```
 
-`GH_PAT` installs the private `stocker_metrics` package and is passed as a BuildKit secret, so it is not stored in the image history.
+The image build installs `stocker_metrics` from its public GitHub repo. No token is required.
 
 ## Logging
 
@@ -123,7 +123,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
 - **docker-build**: on PRs only, pushes `amiroz/projects:stock_data_pr_<PR#>`
 - **promote-latest**: on merge to `main`, retags that PR image to `amiroz/projects:stock_data_latest`
 
-Repo secrets: `GH_PAT`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
 
 ## Dependencies
 

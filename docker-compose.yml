@@ -4,8 +4,6 @@ services:
   stock-scraper:
     build:
       context: .
-      secrets:
-        - gh_pat
     container_name: stock-data-scraper
     environment:
       - LOG_LEVEL=INFO
@@ -14,14 +12,10 @@ services:
       - db_url=${db_url}
     volumes:
       - ./logs:/app/logs
-    restart: unless-stopped
+    restart: "no"
     networks:
       - stock-network
 
 networks:
   stock-network:
     driver: bridge
-
-secrets:
-  gh_pat:
-    environment: GH_PAT
