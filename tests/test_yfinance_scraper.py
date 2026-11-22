@@ -24,10 +24,10 @@ STORED_TYPES = {
     "market_cap": str,
     "pe_ratio": str,
     "price": float,
-    "change": str,
-    "volume": str,
-    "numOfRisingDays": str,
-    "accumulatedChange": str,
+    "change": float,
+    "volume": int,
+    "numOfRisingDays": int,
+    "accumulatedChange": float,
     "timestamp": datetime,
 }
 DOCUMENT_FIELDS = set(STORED_TYPES) - {
@@ -167,8 +167,8 @@ def test_formats_match_the_stored_finviz_strings():
         "market_cap": "5100.81B",
         "pe_ratio": "38.94",
         "price": 349.51,
-        "change": "5.31%",
-        "volume": "88,958,281",
+        "change": 5.31,
+        "volume": 88_958_281,
     }
 
 
@@ -176,10 +176,12 @@ def test_numeric_edge_formats():
     assert ys.format_market_cap(149_970_000) == "149.97M"
     assert ys.format_market_cap(5_450_000) == "5.45M"
     assert ys.format_market_cap(1_000_000_000) == "1.00B"
-    assert ys.format_change(98.8, 100) == "-1.20%"
-    assert ys.format_change(100, 100) == "0.00%"
+    assert ys.format_change(98.8, 100) == -1.2
+    assert ys.format_change(100, 100) == 0.0
+    assert ys.format_change(349.51, 331.889) == 5.31
     assert ys.format_pe(-3.2) == "-"
-    assert ys.format_volume(0) == "0"
+    assert ys.format_volume(0) == 0
+    assert ys.format_volume(88_958_281.4) == 88_958_281
     assert ys.clean_company("Amazon.com, Inc.") == "Amazon.com Inc"
     assert ys.clean_company("Berkshire Hathaway Inc.") == "Berkshire Hathaway Inc"
 
@@ -209,8 +211,8 @@ def test_missing_quote_values_use_finviz_placeholders():
     assert document["market_cap"] == "-"
     assert document["pe_ratio"] == "-"
     assert document["price"] is None
-    assert document["change"] == "-"
-    assert document["volume"] == "-"
+    assert document["change"] is None
+    assert document["volume"] is None
 
 
 def test_missing_profile_values_never_overwrite_stored_values():
@@ -415,13 +417,13 @@ def test_daily_insert_sets_profile_fields_on_insert_only():
     assert apple["company"] == "Apple Inc"
     assert apple["sector"] == "Technology"
     assert apple["price"] == 303.0
-    assert apple["numOfRisingDays"] == "3"
-    assert apple["accumulatedChange"] == "5.0"
+    assert apple["numOfRisingDays"] == 3
+    assert apple["accumulatedChange"] == 5.0
 
     microsoft = collection.docs["MSFT"]
     assert microsoft["company"] == "Microsoft Corporation"
     assert microsoft["sector"] == microsoft["industry"] == microsoft["country"] == "-"
-    assert microsoft["numOfRisingDays"] == "1"
+    assert microsoft["numOfRisingDays"] == 1
     assert sf.get_aggregate_counts() == {"total_read": 2, "inserted": 1, "updated": 1}
 
 
@@ -451,8 +453,8 @@ def test_prior_day_same_price_records_the_new_day(monkeypatch):
     sf.write_or_update_to_mongo([document], collection)
     sf.write_or_update_to_mongo([document], collection)
     stored = collection.docs["AAPL"]
-    assert stored["numOfRisingDays"] == "3"
-    assert stored["accumulatedChange"] == "4.0"
+    assert stored["numOfRisingDays"] == 3
+    assert stored["accumulatedChange"] == 4.0
     assert stored["timestamp"] == today
     assert stored["price"] == 349.51
 
@@ -473,7 +475,7 @@ def test_new_day_update_matches_ticker_only(monkeypatch):
     sf.write_or_update_to_mongo([document], collection)
 
     assert queries == [{"ticker": "AAPL"}]
-    assert collection.docs["AAPL"]["numOfRisingDays"] == "3"
+    assert collection.docs["AAPL"]["numOfRisingDays"] == 3
 
 
 def test_same_day_price_move_does_not_increment_rising_days(monkeypatch):
@@ -499,7 +501,7 @@ def test_same_price_rerun_does_not_increment_rising_days():
     )
     ys.run_daily(collection, **run)
     ys.run_daily(collection, **run)
-    assert collection.docs["AAPL"]["numOfRisingDays"] == "1"
+    assert collection.docs["AAPL"]["numOfRisingDays"] == 1
 
 
 def test_legacy_documents_still_set_every_field():

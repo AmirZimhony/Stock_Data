@@ -51,7 +51,7 @@ A daily run fails (non-zero exit) when nothing was written or a quote batch fail
 
 ## Data Schema
 
-Unchanged from the Finviz scraper; the standardizer and insights jobs parse these strings.
+`change`, `volume`, `numOfRisingDays` and `accumulatedChange` are stored as native numbers (DP-103). The other fields keep the existing display strings. Documents written before the switch still hold strings (`"5.31%"`, `"88,958,281"`, `"3"`, `"4.25"`) until the ticker's next daily run rewrites `change` and `volume`, and its next run on a new trading day rewrites the streak fields. Tickers that are no longer quoted keep their strings. Every reader accepts both, and `stocks_standardizer` renders native numbers back to the same strings in `stocks_merged`.
 
 | Field | Type | Example | Source |
 |---|---|---|---|
@@ -64,12 +64,13 @@ Unchanged from the Finviz scraper; the standardizer and insights jobs parse thes
 | `market_cap` | str | `5100.81B`, `149.97M` | `marketCap` |
 | `pe_ratio` | str | `38.94` | `trailingPE` |
 | `price` | float or None | `349.51` | `regularMarketPrice` |
-| `change` | str | `5.31%`, `-1.20%` | price vs `regularMarketPreviousClose` |
-| `volume` | str | `88,958,281` | `regularMarketVolume` |
-| `numOfRisingDays`, `accumulatedChange` | str | `3`, `4.25` | computed by the writer |
+| `change` | float or None | `5.31`, `-1.2` | percent points (5.31 means 5.31%) of price vs `regularMarketPreviousClose`, 2 decimals |
+| `volume` | int or None | `88958281` | `regularMarketVolume`, shares traded |
+| `numOfRisingDays` | int | `3`, `-2` | computed by the writer |
+| `accumulatedChange` | float | `4.25` | computed by the writer, percent points (a flat first-day insert stores the int `0`, matching the old text `"0"` in `stocks_merged`) |
 | `timestamp` | datetime (UTC) | | last daily write |
 
-Missing text and numeric strings are `-`; a missing price is `None`. Documents are upserted by `ticker`.
+Missing text fields are `-`. A missing `change`, `volume` or `price` is `None` (null); a real zero is stored as `0`. Documents are upserted by `ticker`.
 
 ## Project Structure
 
