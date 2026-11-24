@@ -3,7 +3,8 @@ NASDAQ, NYSE, and NYSE American common stocks from Yahoo Finance (yfinance).
 
 Daily: batched quote requests for price, change, volume, market cap, and P/E.
 Weekly: one quoteSummary request per ticker for company, sector, industry,
-and country. Documents keep the Finviz display formats stored in MongoDB.
+and country. change, volume, numOfRisingDays and accumulatedChange are native
+numbers; the other fields keep the display formats stored in MongoDB.
 """
 
 import logging
@@ -195,22 +196,23 @@ def format_price(value):
 
 
 def format_change(price, previous_close):
-    """Finviz style: "5.31%", "-1.20%" (no plus sign)."""
+    """Percent change in percent points, 2 decimals (5.31 means 5.31%); None if unknown."""
     price, previous_close = _number(price), _number(previous_close)
     if price is None or not previous_close:
-        return "-"
-    return f"{(price - previous_close) / previous_close * 100:.2f}%"
+        return None
+    return round((price - previous_close) / previous_close * 100, 2)
 
 
 def format_volume(value):
+    """Shares traded (regularMarketVolume) as an int; None if unknown, 0 stays 0."""
     number = _number(value)
     if number is None:
-        return "-"
-    return f"{int(round(number)):,}"
+        return None
+    return int(round(number))
 
 
 def clean_company(name):
-    """Finviz drops commas and the trailing period ("Amazon.com, Inc." -> "Amazon.com Inc")."""
+    """drops commas and the trailing period ("Amazon.com, Inc." -> "Amazon.com Inc")."""
     text = " ".join(str(name or "").replace(",", "").split()).rstrip(".")
     return text or "-"
 
@@ -221,7 +223,10 @@ def _label(value, labels):
 
 
 def build_document(serial_number, ticker, quote):
-    """Finviz-shaped document from one Yahoo quote. Profile fields default to "-"."""
+    """shaped document from one Yahoo quote. Profile fields default to "-".
+
+    change (percent points) and volume are numbers, or None when Yahoo has no value.
+    """
     price = quote.get("regularMarketPrice")
     return {
         "serial_number": serial_number,

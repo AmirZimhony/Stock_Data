@@ -2,6 +2,7 @@
 MongoDB writes for NASDAQ stock documents.
 """
 
+import math
 import threading
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -28,6 +29,49 @@ def _market_date(value):
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(MARKET_TZ).date()
+
+
+def parse_number(value):
+    """Float from a legacy display string or a native number; None when missing.
+
+    Accepts "5.31%", "88,958,281", "3", 5.31, 3. The placeholder "-", blanks,
+    None, NaN, booleans and unparseable values are missing (None). A real zero
+    stays 0.0.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip().rstrip("%").replace(",", "")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def parse_int(value):
+    """parse_number rounded to an int; None when missing."""
+    number = parse_number(value)
+    return None if number is None else int(round(number))
+
+
+def _quote_fields(data):
+    """Native-number change (percent points, 2 decimals) and volume for the $set.
+
+    Accepts legacy display strings or numbers; a missing value is stored as None
+    (null), never 0.
+    """
+    change = parse_number(data["change"])
+    return {
+        "change": None if change is None else round(change, 2),
+        "volume": parse_int(data["volume"]),
+    }
+
+
+def _reported_change(data):
+    """Reported change percentage from an incoming record; 0 when missing."""
+    change = parse_number(data["change"])
+    return 0 if change is None else change
 
 
 # Thread-safe aggregate counters across the whole run
@@ -103,8 +147,7 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                                     "market_cap": data["market_cap"],
                                     "pe_ratio": data["pe_ratio"],
                                     "price": data["price"],
-                                    "volume": data["volume"],
-                                    "change": data["change"],
+                                    **_quote_fields(data),
                                     "timestamp": write_time,
                                 }
                             },
@@ -117,17 +160,15 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                     current_price = current_stock.get("price")
                     new_price = data.get("price")
                     # Get current state
-                    current_rising_days_str = current_stock.get("numOfRisingDays", "-")
+                    # Stored values are legacy strings or native numbers
                     current_rising_days = (
-                        0
-                        if current_rising_days_str == "-"
-                        else int(current_rising_days_str)
+                        parse_int(current_stock.get("numOfRisingDays")) or 0
                     )
-
-                    current_change_str = current_stock.get("accumulatedChange", "-")
-                    current_change = (
-                        0 if current_change_str == "-" else float(current_change_str)
+                    current_change = parse_number(
+                        current_stock.get("accumulatedChange")
                     )
+                    if current_change is None:
+                        current_change = 0
 
                     # Calculate actual price change percentage from stored prices (more reliable than the reported change)
                     try:
@@ -140,18 +181,10 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                             ) * 100
                         else:
                             # Fallback to reported change if price is 0 or invalid
-                            actual_price_change_pct = (
-                                0
-                                if data["change"] == "-"
-                                else float(data["change"].strip("%"))
-                            )
+                            actual_price_change_pct = _reported_change(data)
                     except (ValueError, TypeError, ZeroDivisionError):
                         # Fallback to reported change if price calculation fails
-                        actual_price_change_pct = (
-                            0
-                            if data["change"] == "-"
-                            else float(data["change"].strip("%"))
-                        )
+                        actual_price_change_pct = _reported_change(data)
 
                     # Calculate new rising_days based on actual price change
                     if actual_price_change_pct > 0:
@@ -193,10 +226,9 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                                 "market_cap": data["market_cap"],
                                 "pe_ratio": data["pe_ratio"],
                                 "price": data["price"],
-                                "change": data["change"],
-                                "volume": data["volume"],
-                                "numOfRisingDays": str(new_rising_days),
-                                "accumulatedChange": str(new_accumulated_change),
+                                **_quote_fields(data),
+                                "numOfRisingDays": new_rising_days,
+                                "accumulatedChange": new_accumulated_change,
                                 "timestamp": write_time,
                             }
                         },
@@ -215,9 +247,7 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                 # New stock - initialize values based on change percentage
                 try:
                     # Get change percentage to determine initial rising/falling state
-                    new_change = (
-                        0 if data["change"] == "-" else float(data["change"].strip("%"))
-                    )
+                    new_change = _reported_change(data)
 
                     if new_change > 0:
                         # Stock is rising on first day
@@ -244,10 +274,9 @@ def write_or_update_to_mongo(page_data, collection, insert_only=()):
                         "market_cap": data["market_cap"],
                         "pe_ratio": data["pe_ratio"],
                         "price": data["price"],
-                        "change": data["change"],
-                        "volume": data["volume"],
-                        "numOfRisingDays": str(initial_rising_days),
-                        "accumulatedChange": str(initial_accumulated_change),
+                        **_quote_fields(data),
+                        "numOfRisingDays": initial_rising_days,
+                        "accumulatedChange": initial_accumulated_change,
                         "timestamp": write_time,
                     }
                 }
